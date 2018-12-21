@@ -1,0 +1,23 @@
+packages: ./census-servant
+jobs: 4
+with-compiler: /usr/local/bin/ghc
+
+--source-repository-package
+--    type: git
+--    location: https://github.com/tathougies/beam
+--    subdir: beam-core
+--    tag: 8503c45e118d911b5d158d23f9b25fcc0f3acb37
+
+--source-repository-package
+--    type: git
+--    location: https://github.com/tathougies/beam
+--    subdir: beam-sqlite
+--    tag: 8503c45e118d911b5d158d23f9b25fcc0f3acb37
+
+--source-repository-package
+--    type: git
+--    location: https://github.com/tathougies/beam
+--    subdir: beam-migrate
+--    tag: 8503c45e118d911b5d158d23f9b25fcc0f3acb37
+
+
