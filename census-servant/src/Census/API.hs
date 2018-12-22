@@ -32,21 +32,27 @@ baseUrl = BaseUrl Https "api.census.gov" 443 "data"
 
 data Census_Routes route = Census_Routes
   {
-    _ACS :: route :- Capture "Year" Year :> "acs" :> Capture "span" ACS_Span :> QueryParams "get" Text :> QueryParam "for" Text :> QueryParam "in" Text :> QueryParam "key" Text :> Get '[JSON] A.Value
+    _ACS :: route :- Capture "Year" Year :> "acs" :> Capture "span" Text :> QueryParams "get" Text :> QueryParam "for" Text :> QueryParam "in" Text :> QueryParam "key" Text :> Get '[JSON] A.Value
   }
   deriving (Generic)
 
 censusClients :: Census_Routes (AsClientT ClientM)
 censusClients = genericClient
 
--- OpenFEC specific constants
+-- Census specific constants
 
 type ApiKey = Text
 censusApiKey :: ApiKey
 censusApiKey = "2a9aeb4cae45db2d5e7ce1c9d0622caf68e8de15"
 
+data ACS_Span = ACS1 | ACS3 | ACS5 deriving (Show,Enum,Eq,Ord,Bounded)
+acsSpanToText :: ACS_Span -> Text
+acsSpanToText ACS1 = "acs1"
+acsSpanToText ACS3 = "acs3"
+acsSpanToText ACS5 = "acs5"
+
+
 type Year = Int
-type ACS_Span = Text
 type ACS_DataCode = Text
 
 -- Want constructors that take smarter types, like a state/county or state/congressional district or whatever
@@ -58,10 +64,10 @@ geoCodeToQuery :: ACS_GeoCode -> (Maybe Text, Maybe Text)
 geoCodeToQuery (ACS_GeoCodeRawFor forText) = (Just forText, Nothing)
 geoCodeToQuery (ACS_GeoCodeRawForIn forText inText) = (Just forText, Just inText)
 
-getTestCensusData :: Year -> ACS_Span -> [ACS_DataCode] -> ACS_GeoCode -> ClientM A.Value
-getTestCensusData year span codes geoCode =
+getCensusData :: Year -> ACS_Span -> [ACS_DataCode] -> ACS_GeoCode -> ClientM A.Value
+getCensusData year span codes geoCode =
   let (forM, inM) = geoCodeToQuery geoCode
-  in (_ACS censusClients) year span codes forM inM (Just censusApiKey)
+  in (_ACS censusClients) year (acsSpanToText span) codes forM inM (Just censusApiKey)
 
 
 
