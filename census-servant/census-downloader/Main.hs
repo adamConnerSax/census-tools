@@ -28,7 +28,7 @@ main = do
   manager <- newManager managerSettings
   let clientEnv = mkClientEnv manager Census.baseUrl
       runServant x = runClientM x clientEnv
-      query = Census.getCensusData 2015 Census.ACS5 ["B00001_001E"] (ACS_GeoCodeRawFor "us")
+      query = Census.getCensusData 2015 Census.ACS5 ["C27018_002E"] (ACS_GeoCodeRawFor "us")
   result <- runClientM query clientEnv
   case result of
     Left err -> putStrLn $ "Query returned an error: " ++ show err

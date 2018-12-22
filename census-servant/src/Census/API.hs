@@ -51,7 +51,8 @@ acsSpanToText ACS1 = "acs1"
 acsSpanToText ACS3 = "acs3"
 acsSpanToText ACS5 = "acs5"
 
-
+-- https://api.census.gov/data/2017/acs/acs5/variables
+--data ACS_DataCode = C27018_002E
 type Year = Int
 type ACS_DataCode = Text
 
