@@ -51,15 +51,17 @@ type ACS_DataCode = Text
 
 -- Want constructors that take smarter types, like a state/county or state/congressional district or whatever
 data ACS_GeoCode where
-  ACS_GeoCodeRaw :: Text -> Text -> ACS_GeoCode
+  ACS_GeoCodeRawFor :: Text -> ACS_GeoCode
+  ACS_GeoCodeRawForIn :: Text -> Text -> ACS_GeoCode
 
-geoCodeToQuery :: ACS_GeoCode -> (Text,Text)
-geoCodeToQuery (ACS_GeoCodeRaw forText inText) = (forText, inText)
+geoCodeToQuery :: ACS_GeoCode -> (Maybe Text, Maybe Text)
+geoCodeToQuery (ACS_GeoCodeRawFor forText) = (Just forText, Nothing)
+geoCodeToQuery (ACS_GeoCodeRawForIn forText inText) = (Just forText, Just inText)
 
-getTestCensusData :: Year -> ACS_Span -> [ACS_DataCode] -> ACS_GeoCode -> A.Value
+getTestCensusData :: Year -> ACS_Span -> [ACS_DataCode] -> ACS_GeoCode -> ClientM A.Value
 getTestCensusData year span codes geoCode =
-  let (forT, inT) = geoCodeToQuery geoCode
-  in (_ACS censusClients) year span codes (Just forT) (Just inT) (Just censusApiKey)
+  let (forM, inM) = geoCodeToQuery geoCode
+  in (_ACS censusClients) year span codes forM inM (Just censusApiKey)
 
 
 

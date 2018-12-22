@@ -14,18 +14,22 @@
 {-# LANGUAGE TypeFamilies              #-}
 module Main where
 
-import Census.API as Census
+import           Census.API              as Census
 
-import           Network.HTTP.Client                      (Manager, defaultManagerSettings,
-                                                           managerModifyRequest,
-                                                           newManager)
-import           Network.HTTP.Client.TLS                  (tlsManagerSettings)
-import           Servant.Client                           (ClientM,
-                                                           ServantError,
-                                                           mkClientEnv,
-                                                           runClientM)
+import           Network.HTTP.Client     (Manager, defaultManagerSettings,
+                                          managerModifyRequest, newManager)
+import           Network.HTTP.Client.TLS (tlsManagerSettings)
+import           Servant.Client          (ClientM, ServantError, mkClientEnv,
+                                          runClientM)
 
 main :: IO ()
 main = do
-  let managerSettings = tlsManagerSettings { managerModifyRequest  =  putStrLn req >> return req }
-      clientEnv = mkClientEnv manager Censes.baseUrl
+  let managerSettings = tlsManagerSettings { managerModifyRequest  =  (\req -> putStrLn (show req) >> return req) }
+  manager <- newManager managerSettings
+  let clientEnv = mkClientEnv manager Census.baseUrl
+      runServant x = runClientM x clientEnv
+      query = Census.getTestCensusData 2015 "acs5" ["B00001_001E,NAME"] (ACS_GeoCodeRawFor "us")
+  result <- runClientM query clientEnv
+  case result of
+    Left err -> putStrLn $ "Query returned an error: " ++ show err
+    Right x  -> putStrLn $ show x
