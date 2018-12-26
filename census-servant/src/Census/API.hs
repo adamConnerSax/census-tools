@@ -33,6 +33,7 @@ baseUrl = BaseUrl Https "api.census.gov" 443 "data"
 data Census_Routes route = Census_Routes
   {
     _ACS :: route :- Capture "Year" Year :> "acs" :> Capture "span" Text :> QueryParams "get" Text :> QueryParam "for" Text :> QueryParam "in" Text :> QueryParam "key" Text :> Get '[JSON] A.Value
+  , _SAIPE :: route :- "timeseries" :> "poverty" :> "saipe" :>  QueryParams "get" Text :> QueryParam "for" Text :> QueryParam "in" Text :> QueryParam "time" Year :> QueryParam "key" Text :> Get '[JSON] A.Value
   }
   deriving (Generic)
 
@@ -45,11 +46,6 @@ type ApiKey = Text
 censusApiKey :: ApiKey
 censusApiKey = "2a9aeb4cae45db2d5e7ce1c9d0622caf68e8de15"
 
-data ACS_Span = ACS1 | ACS3 | ACS5 deriving (Show,Enum,Eq,Ord,Bounded)
-acsSpanToText :: ACS_Span -> Text
-acsSpanToText ACS1 = "acs1"
-acsSpanToText ACS3 = "acs3"
-acsSpanToText ACS5 = "acs5"
 
 -- https://api.census.gov/data/2017/acs/acs5/variables
 --data ACS_DataCode = C27018_002E
@@ -57,19 +53,49 @@ type Year = Int
 type ACS_DataCode = Text
 
 -- Want constructors that take smarter types, like a state/county or state/congressional district or whatever
-data ACS_GeoCode where
-  ACS_GeoCodeRawFor :: Text -> ACS_GeoCode
-  ACS_GeoCodeRawForIn :: Text -> Text -> ACS_GeoCode
+data GeoCode where
+  GeoCodeRawFor :: Text -> GeoCode
+  GeoCodeRawForIn :: Text -> Text -> GeoCode
+  AllStatesAndCounties :: GeoCode
 
-geoCodeToQuery :: ACS_GeoCode -> (Maybe Text, Maybe Text)
-geoCodeToQuery (ACS_GeoCodeRawFor forText) = (Just forText, Nothing)
-geoCodeToQuery (ACS_GeoCodeRawForIn forText inText) = (Just forText, Just inText)
+geoCodeToQuery :: GeoCode -> (Maybe Text, Maybe Text)
+geoCodeToQuery (GeoCodeRawFor forText) = (Just forText, Nothing)
+geoCodeToQuery (GeoCodeRawForIn forText inText) = (Just forText, Just inText)
+geoCodeToQuery AllStatesAndCounties = (Just "county:*", Just "state:*")
 
-getCensusData :: Year -> ACS_Span -> [ACS_DataCode] -> ACS_GeoCode -> ClientM A.Value
-getCensusData year span codes geoCode =
+data ACS_Span = ACS1 | ACS3 | ACS5 deriving (Show,Enum,Eq,Ord,Bounded)
+acsSpanToText :: ACS_Span -> Text
+acsSpanToText ACS1 = "acs1"
+acsSpanToText ACS3 = "acs3"
+acsSpanToText ACS5 = "acs5"
+
+getACSData :: Year -> ACS_Span -> [ACS_DataCode] -> GeoCode -> ClientM A.Value
+getACSData year span codes geoCode =
   let (forM, inM) = geoCodeToQuery geoCode
   in (_ACS censusClients) year (acsSpanToText span) codes forM inM (Just censusApiKey)
 
+data SAIPEDataCode = MedianHouseholdIncome |
+                     MedianHouseholdIncomeMOE |
+                     Poverty0to17Rate |
+                     Poverty0to17RateMOE |
+                     Poverty0to4Rate |
+                     Poverty0to4RateMOE |
+                     PovertyRate |
+                     PovertyRateMOE
+
+saipeDataCodeToText MedianHouseholdIncome    = "SAEMHI_PT"
+saipeDataCodeToText MedianHouseholdIncomeMOE = "SAEMHI_MOE"
+saipeDataCodeToText Poverty0to17Rate         = "SAEPOVRTO_17_PT"
+saipeDataCodeToText Poverty0to17RateMOE      = "SAEPOVRTO_17_MOE"
+saipeDataCodeToText Poverty0to4Rate          = "SAEPOVRTO_4_PT"
+saipeDataCodeToText Poverty0to4RateMOE       = "SAEPOVRTO_4_MOE"
+saipeDataCodeToText PovertyRate              = "SAEPOVTRTALL_PT"
+saipeDataCodeToText PovertyRateMOE           = "SAEPOVTRTALL_MOE"
+
+getSAIPEData :: Year -> GeoCode -> [SAIPEDataCode] -> ClientM A.Value
+getSAIPEData year geo vars =
+  let (forM, inM) = geoCodeToQuery geo
+  in (_SAIPE censusClients) (saipeDataCodeToText <$> vars) forM inM (Just year) (Just censusApiKey)
 
 
 
