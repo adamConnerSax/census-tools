@@ -21,17 +21,18 @@ import           Control.Exception.Safe (throw)
 import           Control.Lens           ((^.), (^..), (^?))
 import qualified Control.Lens           as L
 import           Control.Monad          (join, sequence)
-import           Data.Functor.Compose   (getCompose)
---import           Control.Monad.Identity (Identity)
 import qualified Data.Aeson             as A
 import qualified Data.Aeson.Lens        as L
+import           Data.ByteString.Lazy  (fromStrict)
 import qualified Data.Foldable          as F
 import           Data.Maybe             (fromMaybe)
 import           Data.Monoid            ((<>))
 import           Data.Text              (Text, unpack)
+import           Data.Text.Encoding     (encodeUtf8)
 import           Data.Vector            (Vector)
 import qualified Data.Vector            as Vec
 import           Data.Vinyl             as V
+import           Data.Vinyl.Functor             as V
 import           Frames                 as F
 import           Frames                 ((:->), (&:))
 import           Frames.CSV             as F
@@ -122,30 +123,24 @@ type MedianHI_MOE = "medianHI_MOE" :-> Int
 type SAIPE = '[StateFIPS, CountyFIPS, MedianHI, MedianHI_MOE]
 
 readJSONArray :: (F.ReadRec rs) => A.Value -> Either Text (F.Record rs)
-readJSONArray x = case (fmap F.readRec $ x ^.. L.values . L._String) of
-  Nothing -> Left "Parse error at the json -> Maybe [Text] level"
-  Just r  -> F.rtraverse getCompose r
+readJSONArray x =
+  let textList :: [Text] = x ^.. L.values . L._String
+  in F.rtraverse V.getCompose $ F.readRec textList
 
 
 censusJSONToFrame :: A.Value -> Either Text (F.FrameRec SAIPE)
 censusJSONToFrame val =
   let vals :: Vec.Vector A.Value = val ^. L._Array
       dataRows = Vec.tail vals -- get rid of header row
-  in sequence $ fmap readJSONArray dataRows
-{-      dataRow v =
-        let stateFIPS :: Maybe Int = v ^? L.nth 0 . L._Integral
-            countyFIPS :: Maybe Int = v ^? L.nth 1 . L._Integral
-            medianHI :: Maybe Int  = v ^? L.nth 2 . L._Integral
-            medianHI_MOE :: Maybe Int = v^?  L.nth 3 . L._Integral
-        in stateFIPS &: countyFIPS &: medianHI &: medianHI_MOE &: V.RNil
-  in F.toFrame $ Vec.mapMaybe  (F.recMaybe . F.rtraverse (fmap L.Identity) . dataRow) dataRows
--}
+  in fmap F.toFrame . sequence $ fmap readJSONArray dataRows
 
-getSAIPEData :: Year -> GeoCode -> [SAIPEDataCode] -> ClientM A.Value
-getSAIPEData year geo vars =
+getSAIPEData :: Year -> GeoCode -> [SAIPEDataCode] -> ClientM (F.FrameRec SAIPE)
+getSAIPEData year geo vars = do
   let (forM, inM) = geoCodeToQuery geo
-  in (_SAIPE censusClients) (saipeDataCodeToText <$> vars) forM inM (Just year) (Just censusApiKey)
-
+  ef <- (_SAIPE censusClients) (saipeDataCodeToText <$> vars) forM inM (Just year) (Just censusApiKey)
+  case censusJSONToFrame ef of
+    Left err -> throw $ err417 { errBody = "Decoding error parsing census API result at Frame: " <> fromStrict (encodeUtf8 err) }
+    Right f -> return f
 
 
 {-

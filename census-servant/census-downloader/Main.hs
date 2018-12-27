@@ -22,10 +22,12 @@ import           Network.HTTP.Client.TLS (tlsManagerSettings)
 import           Servant.Client          (ClientM, ServantError, mkClientEnv,
                                           runClientM)
 
-import           Composite.Aeson         as C
-import           Frames                  as F
+import qualified           Frames                  as F
+import qualified          Frames.CSV                  as F
+import qualified           Pipes as P
+import qualified          Pipes.Prelude as P
 
-f.tableTypes "StateFIPS" "conversion-data/states.csv"
+--F.tableTypes "StateFIPS" ".conversion-data/states.csv"
 
 main :: IO ()
 main = do
@@ -37,4 +39,4 @@ main = do
   result <- runClientM query clientEnv
   case result of
     Left err -> putStrLn $ "Query returned an error: " ++ show err
-    Right x  -> putStrLn $ show x
+    Right x  -> F.runSafeEffect $ F.produceCSV x P.>-> P.print

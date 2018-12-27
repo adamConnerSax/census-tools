@@ -24,6 +24,7 @@ library
   -- other-extensions:
   build-depends:       base >=4.11.1.0
                      , aeson
+                     , bytestring
                      , text
                      , Frames
                      , network-uri
@@ -53,6 +54,7 @@ executable census-downloader
                      , warp
                      , Frames
                      , http-api-data
+                     , pipes
                      , transformers
                      , mtl
                      , http-client
