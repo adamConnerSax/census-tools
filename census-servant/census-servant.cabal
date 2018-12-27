@@ -16,15 +16,16 @@ maintainer:          adam_conner_sax@yahoo.com
 category:            Web
 extra-source-files:  CHANGELOG.md
 
+allow-newer: true
+                     
 library
   exposed-modules: Census.API
   -- other-modules:
   -- other-extensions:
   build-depends:       base >=4.11.1.0
                      , aeson
---                     , bytestring
                      , text
---                     , containers
+                     , Frames
                      , network-uri
                      , servant
                      , lens
@@ -37,6 +38,7 @@ library
                      , servant-client
                      , servant-server
                      , servant
+                     , vinyl
                      , warp
                      , http-api-data
   hs-source-dirs:      src
@@ -49,6 +51,7 @@ executable census-downloader
   build-depends:       base >=4.11.1.0
                      , census-servant
                      , warp
+                     , Frames
                      , http-api-data
                      , transformers
                      , mtl

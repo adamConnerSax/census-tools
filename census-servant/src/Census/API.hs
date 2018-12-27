@@ -7,6 +7,7 @@
 {-# LANGUAGE NoMonomorphismRestriction #-}
 {-# LANGUAGE OverloadedStrings         #-}
 {-# LANGUAGE ScopedTypeVariables       #-}
+{-# LANGUAGE TemplateHaskell           #-}
 {-# LANGUAGE TypeFamilies              #-}
 {-# LANGUAGE TypeOperators             #-}
 module Census.API where
@@ -17,16 +18,32 @@ import           Servant.Client
 import           Servant.Client.Generic
 
 import           Control.Exception.Safe (throw)
+import           Control.Lens           ((^.), (^..), (^?))
+import qualified Control.Lens           as L
+import           Control.Monad          (join, sequence)
+import           Data.Functor.Compose   (getCompose)
+--import           Control.Monad.Identity (Identity)
 import qualified Data.Aeson             as A
---import           Data.ByteString.Char8  (pack)
+import qualified Data.Aeson.Lens        as L
 import qualified Data.Foldable          as F
---import qualified Data.Map               as M
 import           Data.Maybe             (fromMaybe)
 import           Data.Monoid            ((<>))
---import           Data.Scientific        (Scientific)
 import           Data.Text              (Text, unpack)
 import           Data.Vector            (Vector)
-import qualified Data.Vector            as V
+import qualified Data.Vector            as Vec
+import           Data.Vinyl             as V
+import           Frames                 as F
+import           Frames                 ((:->), (&:))
+import           Frames.CSV             as F
+
+-- state FIPS datatypes
+F.tableTypes "StateCountyFIPS" "/Users/adam/DataScience/census-tools/conversion-data/states.csv"
+
+stateCountyFIPSCSV = "conversion-data/states.csv"
+
+-- state table is small so we can load it into memory.  No need to stream
+getStateFIPSFrame :: IO (F.Frame StateCountyFIPS)
+getStateFIPSFrame = F.inCoreAoS $ F.readTable stateCountyFIPSCSV
 
 baseUrl = BaseUrl Https "api.census.gov" 443 "data"
 
@@ -77,20 +94,52 @@ getACSData year span codes geoCode =
 data SAIPEDataCode = MedianHouseholdIncome |
                      MedianHouseholdIncomeMOE |
                      Poverty0to17Rate |
-                     Poverty0to17RateMOE |
+                     Poverty0to17Count |
+                     Poverty0to17MOE |
                      Poverty0to4Rate |
-                     Poverty0to4RateMOE |
+                     Poverty0to4Count |
+                     Poverty0to4MOE |
                      PovertyRate |
-                     PovertyRateMOE
+                     PovertyCount |
+                     PovertyMOE
 
 saipeDataCodeToText MedianHouseholdIncome    = "SAEMHI_PT"
 saipeDataCodeToText MedianHouseholdIncomeMOE = "SAEMHI_MOE"
 saipeDataCodeToText Poverty0to17Rate         = "SAEPOVRTO_17_PT"
-saipeDataCodeToText Poverty0to17RateMOE      = "SAEPOVRTO_17_MOE"
-saipeDataCodeToText Poverty0to4Rate          = "SAEPOVRTO_4_PT"
-saipeDataCodeToText Poverty0to4RateMOE       = "SAEPOVRTO_4_MOE"
-saipeDataCodeToText PovertyRate              = "SAEPOVTRTALL_PT"
-saipeDataCodeToText PovertyRateMOE           = "SAEPOVTRTALL_MOE"
+saipeDataCodeToText Poverty0to17Count        = "SAEPOV0_17_PT"
+saipeDataCodeToText Poverty0to17MOE          = "SAEPOV0_17_MOE"
+saipeDataCodeToText Poverty0to4Rate          = "SAEPOVRT0_4_PT"
+saipeDataCodeToText Poverty0to4Count         = "SAEPOVT0_4_PT"
+saipeDataCodeToText Poverty0to4MOE           = "SAEPOV0_4_MOE"
+saipeDataCodeToText PovertyRate              = "SAEPOVRTALL_PT"
+saipeDataCodeToText PovertyCount             = "SAEPOVALL_PT"
+saipeDataCodeToText PovertyMOE               = "SAEPOVTALL_MOE"
+
+type StateFIPS = "stateFIPS" :-> Int
+type CountyFIPS = "countyFIPS" :-> Int
+type MedianHI = "medianHI" :-> Int
+type MedianHI_MOE = "medianHI_MOE" :-> Int
+type SAIPE = '[StateFIPS, CountyFIPS, MedianHI, MedianHI_MOE]
+
+readJSONArray :: (F.ReadRec rs) => A.Value -> Either Text (F.Record rs)
+readJSONArray x = case (fmap F.readRec $ x ^.. L.values . L._String) of
+  Nothing -> Left "Parse error at the json -> Maybe [Text] level"
+  Just r  -> F.rtraverse getCompose r
+
+
+censusJSONToFrame :: A.Value -> Either Text (F.FrameRec SAIPE)
+censusJSONToFrame val =
+  let vals :: Vec.Vector A.Value = val ^. L._Array
+      dataRows = Vec.tail vals -- get rid of header row
+  in sequence $ fmap readJSONArray dataRows
+{-      dataRow v =
+        let stateFIPS :: Maybe Int = v ^? L.nth 0 . L._Integral
+            countyFIPS :: Maybe Int = v ^? L.nth 1 . L._Integral
+            medianHI :: Maybe Int  = v ^? L.nth 2 . L._Integral
+            medianHI_MOE :: Maybe Int = v^?  L.nth 3 . L._Integral
+        in stateFIPS &: countyFIPS &: medianHI &: medianHI_MOE &: V.RNil
+  in F.toFrame $ Vec.mapMaybe  (F.recMaybe . F.rtraverse (fmap L.Identity) . dataRow) dataRows
+-}
 
 getSAIPEData :: Year -> GeoCode -> [SAIPEDataCode] -> ClientM A.Value
 getSAIPEData year geo vars =

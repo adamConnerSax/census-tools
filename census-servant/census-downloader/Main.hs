@@ -22,6 +22,11 @@ import           Network.HTTP.Client.TLS (tlsManagerSettings)
 import           Servant.Client          (ClientM, ServantError, mkClientEnv,
                                           runClientM)
 
+import           Composite.Aeson         as C
+import           Frames                  as F
+
+f.tableTypes "StateFIPS" "conversion-data/states.csv"
+
 main :: IO ()
 main = do
   let managerSettings = tlsManagerSettings { managerModifyRequest  =  (\req -> putStrLn (show req) >> return req) }
