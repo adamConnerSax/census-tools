@@ -20,23 +20,25 @@ import           Servant.Client.Generic
 import           Control.Exception.Safe (throw)
 import           Control.Lens           ((^.), (^..), (^?))
 import qualified Control.Lens           as L
-import           Control.Monad          (join, sequence)
+import           Control.Monad          (forM_, join, mapM_, sequence)
+import           Control.Monad.IO.Class (MonadIO, liftIO)
 import qualified Data.Aeson             as A
 import qualified Data.Aeson.Lens        as L
-import           Data.ByteString.Lazy  (fromStrict)
+import           Data.ByteString.Lazy   (fromStrict)
 import qualified Data.Foldable          as F
+import qualified Data.List              as List
 import           Data.Maybe             (fromMaybe)
 import           Data.Monoid            ((<>))
-import           Data.Text              (Text, unpack)
+import           Data.Text              (Text, intercalate, unpack)
 import           Data.Text.Encoding     (encodeUtf8)
 import           Data.Vector            (Vector)
 import qualified Data.Vector            as Vec
 import           Data.Vinyl             as V
-import           Data.Vinyl.Functor             as V
+import           Data.Vinyl.Functor     as V
 import           Frames                 as F
 import           Frames                 ((:->), (&:))
 import           Frames.CSV             as F
-
+import qualified Pipes                  as P
 -- state FIPS datatypes
 F.tableTypes "StateCountyFIPS" "/Users/adam/DataScience/census-tools/conversion-data/states.csv"
 
@@ -51,7 +53,7 @@ baseUrl = BaseUrl Https "api.census.gov" 443 "data"
 data Census_Routes route = Census_Routes
   {
     _ACS :: route :- Capture "Year" Year :> "acs" :> Capture "span" Text :> QueryParams "get" Text :> QueryParam "for" Text :> QueryParam "in" Text :> QueryParam "key" Text :> Get '[JSON] A.Value
-  , _SAIPE :: route :- "timeseries" :> "poverty" :> "saipe" :>  QueryParams "get" Text :> QueryParam "for" Text :> QueryParam "in" Text :> QueryParam "time" Year :> QueryParam "key" Text :> Get '[JSON] A.Value
+  , _SAIPE :: route :- "timeseries" :> "poverty" :> "saipe" :>  QueryParam "get" Text :> QueryParam "for" Text :> QueryParam "in" Text :> QueryParam "time" Year :> QueryParam "key" Text :> Get '[JSON] A.Value
   }
   deriving (Generic)
 
@@ -120,38 +122,44 @@ type StateFIPS = "stateFIPS" :-> Int
 type CountyFIPS = "countyFIPS" :-> Int
 type MedianHI = "medianHI" :-> Int
 type MedianHI_MOE = "medianHI_MOE" :-> Int
-type SAIPE = '[StateFIPS, CountyFIPS, MedianHI, MedianHI_MOE]
+type YearF = "year" :-> Int
+type SAIPE = '[MedianHI, MedianHI_MOE, YearF, StateFIPS, CountyFIPS]
 
-readJSONArray :: (F.ReadRec rs) => A.Value -> Either Text (F.Record rs)
-readJSONArray x =
-  let textList :: [Text] = x ^.. L.values . L._String
-  in F.rtraverse V.getCompose $ F.readRec textList
+jsonTextArrayToList :: A.Value -> [Text]
+jsonTextArrayToList x = x ^.. L.values . L._String
+
+jsonArraysOfTextToPipe :: (MonadIO m, Monad m) => m A.Value -> P.Producer Text m ()
+jsonArraysOfTextToPipe mv = do
+  v <- P.lift mv
+--  liftIO $ putStrLn $ show v
+  let vs = v ^.. L.values -- get rid of header row
+  forM_ vs $ \v -> do
+    let csv = intercalate "," $ jsonTextArrayToList v
+--    liftIO $ putStr $ show csv ++ ": "
+    P.yield csv
+  return ()
+
+jsonArraysToRecordPipe :: (F.ReadRec rs, Monad m, MonadIO m) => m A.Value -> P.Producer (F.Rec (Either Text :. F.ElField) rs) m ()
+jsonArraysToRecordPipe mv = jsonArraysOfTextToPipe mv P.>-> F.pipeTableEither
+
+mapEither :: Monad m => P.Pipe (F.Rec (Either Text :. F.ElField) rs) (F.Record rs) m ()
+mapEither = do
+  eRec <- P.await
+  case (F.rtraverse V.getCompose eRec) of
+    Left _ -> mapEither -- skip it
+    Right r -> P.yield r >> mapEither 
+
+-- for debugging
+eitherRecordPrint :: (V.RMap rs, V.ReifyConstraint Show V.ElField rs, V.RecordToList rs) => F.Rec (Either Text :. F.ElField) rs -> IO ()
+eitherRecordPrint eRec =
+  case (F.rtraverse V.getCompose eRec) of
+    Left err -> liftIO $ putStrLn $ "Error: " ++ (unpack err)
+    Right r  -> liftIO $ print r
 
 
-censusJSONToFrame :: A.Value -> Either Text (F.FrameRec SAIPE)
-censusJSONToFrame val =
-  let vals :: Vec.Vector A.Value = val ^. L._Array
-      dataRows = Vec.tail vals -- get rid of header row
-  in fmap F.toFrame . sequence $ fmap readJSONArray dataRows
-
-getSAIPEData :: Year -> GeoCode -> [SAIPEDataCode] -> ClientM (F.FrameRec SAIPE)
-getSAIPEData year geo vars = do
+getSAIPEData :: Year -> GeoCode -> [SAIPEDataCode] -> ClientM A.Value
+getSAIPEData year geo vars =
   let (forM, inM) = geoCodeToQuery geo
-  ef <- (_SAIPE censusClients) (saipeDataCodeToText <$> vars) forM inM (Just year) (Just censusApiKey)
-  case censusJSONToFrame ef of
-    Left err -> throw $ err417 { errBody = "Decoding error parsing census API result at Frame: " <> fromStrict (encodeUtf8 err) }
-    Right f -> return f
+  in (_SAIPE censusClients) (Just $ intercalate "," $ (saipeDataCodeToText <$> vars)) forM inM (Just year) (Just censusApiKey)
 
 
-{-
-censusMaxPerPage :: Int
-censusMaxPerPage = 100
-
-data QueryLimit = QueryLimit { maxQueries :: Int, perTime :: C.DiffTime }
-censusQueryLimit = QueryLimit 120 (C.secondsToDiffTime 35)
-
-delayQueries :: QueryLimit -> IO ()
-delayQueries (QueryLimit n per) =
-  let sleepMicros = 1 + C.diffTimeToPicoseconds per `div` (fromIntegral $ 1000000 * n)
-  in threadDelay (fromIntegral sleepMicros)
--}

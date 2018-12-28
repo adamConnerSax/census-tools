@@ -33,12 +33,14 @@ library
                      , lens-aeson
                      , vector
                      , http-api-data
+                     , pipes                     
                      , safe-exceptions
                      , scientific
                      , servant-client-core >= 0.15
                      , servant-client
                      , servant-server
                      , servant
+                     , transformers
                      , vinyl
                      , warp
                      , http-api-data
@@ -50,17 +52,24 @@ executable census-downloader
   -- other-modules:
   -- other-extensions:
   build-depends:       base >=4.11.1.0
-                     , census-servant
+                     , aeson
+                     , bytestring
+                     , census-servant                     
                      , warp
                      , Frames
                      , http-api-data
                      , pipes
+                     , pipes-safe
                      , transformers
                      , mtl
                      , http-client
                      , http-client-tls
                      , http-types
+                     , safe-exceptions
+                     , servant
                      , servant-client-core >= 0.15
                      , servant-client
+                     , servant-server
+                     , text
   hs-source-dirs:      census-downloader
   default-language:    Haskell2010
