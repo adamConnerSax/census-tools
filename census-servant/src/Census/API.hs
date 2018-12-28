@@ -41,13 +41,13 @@ import           Frames.CSV             as F
 import qualified Pipes                  as P
 
 -- state FIPS datatypes
-F.tableTypes "StateCountyFIPS" "/Users/adam/DataScience/census-tools/conversion-data/states.csv"
+F.tableTypes "StateFIPSAndNames" "/Users/adam/DataScience/census-tools/conversion-data/states.csv"
 
-stateCountyFIPSCSV = "conversion-data/states.csv"
+stateFIPSAndNamesCSV = "conversion-data/states.csv"
 
 -- state table is small so we can load it into memory.  No need to stream
-getStateFIPSFrame :: IO (F.Frame StateCountyFIPS)
-getStateFIPSFrame = F.inCoreAoS $ F.readTable stateCountyFIPSCSV
+getStateFIPSFrame :: IO (F.Frame StateFIPSAndNames)
+getStateFIPSFrame = F.inCoreAoS $ F.readTable stateFIPSAndNamesCSV
 
 baseUrl = BaseUrl Https "api.census.gov" 443 "data"
 
@@ -123,7 +123,7 @@ saipeDataCodeToText PovertyMOE               = "SAEPOVTALL_MOE"
 declareColumn "CountyFIPS" ''Int -- = "countyFIPS" :-> Int
 type MedianHI = "medianHI" :-> Int
 type MedianHI_MOE = "medianHI_MOE" :-> Int
-type PovertyR = "povertyR" :-> Int
+type PovertyR = "povertyR" :-> Double
 type YearF = "year" :-> Int
 type SAIPE = '[MedianHI, MedianHI_MOE, PovertyR, YearF, StateFIPS, CountyFIPS]
 
