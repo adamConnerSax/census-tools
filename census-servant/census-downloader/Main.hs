@@ -28,6 +28,10 @@ import           Servant.Client          (ClientM, ServantError, mkClientEnv,
 import           Control.Monad.IO.Class  (MonadIO, liftIO)
 import qualified Data.Aeson              as A
 import           Data.ByteString.Lazy    (fromStrict)
+--import           Data.List               (catMaybe)
+import           Control.Lens            ((^.))
+import qualified Control.Lens            as L
+import           Data.Maybe              (catMaybes, isJust)
 import           Data.Text.Encoding      (encodeUtf8)
 import qualified Frames                  as F
 import qualified Frames.CSV              as F
@@ -36,35 +40,29 @@ import qualified Pipes                   as P
 import qualified Pipes.Prelude           as P
 import qualified Pipes.Safe              as P
 
---F.tableTypes "StateFIPS" ".conversion-data/states.csv"
+type FIPS = "fips" F.:-> Int
 
 main :: IO ()
 main = do
-  let managerSettings = tlsManagerSettings { managerModifyRequest  =  (\req -> putStrLn (show req) >> return req) }
+  let managerSettings = tlsManagerSettings -- { managerModifyRequest  =  (\req -> putStrLn (show req) >> return req) }
+  stateKeysFrame <- getStateFIPSFrame
   manager <- newManager managerSettings
   let clientEnv = mkClientEnv manager Census.baseUrl
       runServant x = runClientM x clientEnv
       allStatesAndCounties = AllStatesAndCounties
       allStates = GeoCodeRawForIn "county:*" "state:01"
-      query = Census.getSAIPEData 2015 allStates [MedianHouseholdIncome, MedianHouseholdIncomeMOE]
+      query = Census.getSAIPEData 2015 allStatesAndCounties [MedianHouseholdIncome, MedianHouseholdIncomeMOE,PovertyRate]
       parsePipe :: IO A.Value -> P.Producer (F.Rec (Either F.Text F.:. F.ElField) SAIPE) IO () = jsonArraysToRecordPipe
   --_ <- flip runClientM clientEnv (P.runEffect $ P.for parsePipe (liftIO . eitherRecordPrint))
   result <- runClientM query clientEnv
   case result of
     Left err -> putStrLn $ "Query produced an error: " ++ show err
     Right x  -> do
-      frame <- FI.inCoreAoS $ parsePipe (return x) P.>-> mapEither
-      let csvProducer :: P.Producer String IO () = F.produceCSV frame
-      P.runEffect $ P.for csvProducer (P.lift . print)
+      censusFrame <- FI.inCoreAoS $ parsePipe (return x) P.>-> mapEither
+      let withStateAbbrevsF = F.toFrame $ catMaybes $ fmap F.recMaybe $ F.leftJoin @'[StateFIPS] censusFrame stateKeysFrame
+          addComboFIPS r = (r^.Census.stateFIPS * 1000 + r^.Census.countyFIPS) F.&: r
+          simplifiedF :: F.FrameRec '[FIPS, StateFIPS, CountyFIPS, Abbreviation, MedianHI, MedianHI_MOE, PovertyR] = addComboFIPS . F.rcast <$> withStateAbbrevsF
+      F.writeCSV "data/medianHIByCounty.csv" simplifiedF
   return ()
-  {-
-  result <- runClientM query clientEnv -- Either ServantError
-  case result of
-    Left err -> putStrLn $ "Query produced an error: " ++ show err
-    Right x -> do
-      putStrLn $ show x
---      putStrLn $ show
-      case censusJSONToFrame x  of
-        Left err -> throw $ err417 { errBody = "Decoding error parsing census API result at Frame: " <> fromStrict (encodeUtf8 err)  }
-        Right f -> F.runSafeEffect $ F.produceCSV f P.>-> P.print
--}
+
+

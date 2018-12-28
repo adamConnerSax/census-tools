@@ -58,6 +58,7 @@ executable census-downloader
                      , warp
                      , Frames
                      , http-api-data
+                     , lens
                      , pipes
                      , pipes-safe
                      , transformers

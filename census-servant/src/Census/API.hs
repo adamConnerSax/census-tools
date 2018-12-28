@@ -39,6 +39,7 @@ import           Frames                 as F
 import           Frames                 ((:->), (&:))
 import           Frames.CSV             as F
 import qualified Pipes                  as P
+
 -- state FIPS datatypes
 F.tableTypes "StateCountyFIPS" "/Users/adam/DataScience/census-tools/conversion-data/states.csv"
 
@@ -118,12 +119,13 @@ saipeDataCodeToText PovertyRate              = "SAEPOVRTALL_PT"
 saipeDataCodeToText PovertyCount             = "SAEPOVALL_PT"
 saipeDataCodeToText PovertyMOE               = "SAEPOVTALL_MOE"
 
-type StateFIPS = "stateFIPS" :-> Int
-type CountyFIPS = "countyFIPS" :-> Int
+--type StateFIPS = "stateFIPS" :-> Int
+declareColumn "CountyFIPS" ''Int -- = "countyFIPS" :-> Int
 type MedianHI = "medianHI" :-> Int
 type MedianHI_MOE = "medianHI_MOE" :-> Int
+type PovertyR = "povertyR" :-> Int
 type YearF = "year" :-> Int
-type SAIPE = '[MedianHI, MedianHI_MOE, YearF, StateFIPS, CountyFIPS]
+type SAIPE = '[MedianHI, MedianHI_MOE, PovertyR, YearF, StateFIPS, CountyFIPS]
 
 jsonTextArrayToList :: A.Value -> [Text]
 jsonTextArrayToList x = x ^.. L.values . L._String
