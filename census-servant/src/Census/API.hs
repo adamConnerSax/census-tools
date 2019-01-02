@@ -41,7 +41,7 @@ import           Frames.CSV             as F
 import qualified Pipes                  as P
 
 -- state FIPS datatypes
-F.tableTypes "StateFIPSAndNames" "/Users/adam/DataScience/census-tools/conversion-data/states.csv"
+F.tableTypes "StateFIPSAndNames" "../conversion-data/states.csv"
 
 stateFIPSAndNamesCSV = "conversion-data/states.csv"
 
