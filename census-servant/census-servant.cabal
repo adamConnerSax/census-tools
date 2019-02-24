@@ -20,6 +20,7 @@ allow-newer: true
                      
 library
   exposed-modules: Census.API
+                 , Census.Fields
   -- other-modules:
   -- other-extensions:
   build-depends:       base >=4.11.1.0
@@ -42,7 +43,6 @@ library
                      , servant-server
                      , servant
                      , transformers
-                     , uri-encode
                      , vinyl
                      , warp
                      , http-api-data

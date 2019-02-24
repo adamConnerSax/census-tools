@@ -13,9 +13,11 @@
 {-# LANGUAGE TypeApplications          #-}
 {-# LANGUAGE TypeFamilies              #-}
 {-# LANGUAGE TypeOperators             #-}
+{-# LANGUAGE AllowAmbiguousTypes       #-}
 module Main where
 
 import qualified Census.API              as Census
+import qualified Census.Fields           as Census
 
 import           Control.Exception.Safe  (throw)
 import           Network.HTTP.Client     (Manager, defaultManagerSettings,
@@ -37,13 +39,15 @@ import           Data.Text               (Text)
 import           Data.Text.Encoding      (encodeUtf8)
 import qualified Frames                  as F
 import qualified Frames.CSV              as F
+import qualified Frames.Melt             as F -- for Elem
 import qualified Frames.InCore           as FI
 import qualified Data.Vinyl.TypeLevel    as V
+import qualified Data.Vinyl.Core         as V
 import qualified Pipes                   as P
 import qualified Pipes.Prelude           as P
 import qualified Pipes.Safe              as P
 
-type FIPS = "fips" F.:-> Int
+type ACSFields = [Census.Population, Census.MedianHouseholdIncome, Census.MedianAge, Census.CollegeGrads]
 
 main :: IO ()
 main = do
@@ -52,32 +56,35 @@ main = do
   manager <- newManager managerSettings
   let clientEnv = mkClientEnv manager Census.baseUrl
       runServant x = runClientM x clientEnv
-  resFEs <- sequence $ fmap (\x -> putStr (show x ++ "...") >> getOneYear runServant stateKeysFrame x) ([2017])
+  resFEs <- sequence $ fmap (\x -> putStr (show x ++ "...") >> getOneYear @ACSFields runServant stateKeysFrame Census.AllStatesAndDistricts x) ([2017])
   let (errors,resFs) = partitionEithers resFEs
   case (List.null errors) of
     True  -> F.writeCSV "data/popByDistrict.csv" $ mconcat resFs
     False -> putStrLn $ "Some queries returned errors: " ++ show errors
   return ()
 
-type ACSRes = ('[Census.Abbreviation] V.++ Census.ACSIdFields V.++ Census.ACSDataFields)
+type ACSRes gs fs = ('[Census.StateAbbreviation] V.++ gs V.++ fs)
 
-getOneYear :: (ClientM A.Value -> IO (Either ServantError A.Value))
+getOneYear :: forall fs gs. (Census.ACSQueryFields fs gs
+                            , FI.RecVec ((gs V.++ fs) V.++ '[Census.StateName, Census.StateAbbreviation])
+                            , V.RMap ((gs V.++ fs) V.++ '[Census.StateName, Census.StateAbbreviation])
+                            , (gs V.++ fs) F.⊆ ((gs V.++ fs) V.++ '[Census.StateName, Census.StateAbbreviation])
+                            , F.ElemOf (gs V.++ fs) Census.StateFIPS
+                            , F.ElemOf  ((gs V.++ fs) V.++ '[Census.StateName, Census.StateAbbreviation]) Census.StateAbbreviation
+                            {-, F.Elem (fs V.++ gs) Census.StateFIPS-})
+           => (ClientM (F.FrameRec (gs V.++ fs)) -> IO (Either ServantError (F.FrameRec (gs V.++ fs))))
            -> F.Frame Census.StateFIPSAndNames
+           -> Census.GeoCode gs
            -> Census.Year
-           -> IO (Either ServantError (F.FrameRec ACSRes))
-getOneYear runServant stateKeysFrame year = do
-  let allStatesAndDistricts = Census.AllStatesAndDistricts
-      allInAlabama = Census.GeoCodeRawForIn "county:*" "state:01"
-      acsQuery = Census.getACSData year Census.ACS1 Census.AllStatesAndDistricts Census.acsQueryFields
-      parsePipe :: IO A.Value -> P.Producer (F.Rec (Either F.Text F.:. F.ElField) Census.ACSQueryFields) IO () = Census.jsonArraysToRecordPipe
+           -> IO (Either ServantError (F.FrameRec (ACSRes gs fs)))
+getOneYear runServant stateKeysFrame geoCode year = do
+  let acsQuery = Census.getACSDataFrame @fs year Census.ACS1 geoCode
   result <- runServant acsQuery
   case result of
     Left err -> return $ Left err
-    Right x  -> Right <$> do      
-      censusFrame <- FI.inCoreAoS $ parsePipe (return x) P.>-> Census.mapEither
+    Right censusFrame  -> Right <$> do      
       let withStateAbbrevsF = F.toFrame $ catMaybes $ fmap F.recMaybe $ F.leftJoin @'[Census.StateFIPS] censusFrame stateKeysFrame
---          addComboFIPS r = (r^.Census.stateFIPS * 1000 + r^.Census.countyFIPS) F.&: r
-          simplifiedF :: F.FrameRec ACSRes = F.rcast <$> withStateAbbrevsF
+          simplifiedF :: F.FrameRec (ACSRes gs fs) = F.rcast <$> withStateAbbrevsF
       return simplifiedF
 
 

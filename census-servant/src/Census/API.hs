@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds                 #-}
+{-# LANGUAGE PolyKinds                 #-}
 {-# LANGUAGE DeriveGeneric             #-}
 {-# LANGUAGE FlexibleContexts          #-}
 {-# LANGUAGE FlexibleInstances         #-}
@@ -10,7 +11,12 @@
 {-# LANGUAGE TemplateHaskell           #-}
 {-# LANGUAGE TypeFamilies              #-}
 {-# LANGUAGE TypeOperators             #-}
+{-# LANGUAGE TypeApplications          #-}
+{-# LANGUAGE ConstraintKinds           #-}
+{-# LANGUAGE AllowAmbiguousTypes       #-}
 module Census.API where
+
+import qualified Census.Fields as CF 
 
 import           Servant
 import           Servant.API.Generic
@@ -39,24 +45,21 @@ import           Data.Vinyl.TypeLevel   as V
 import           Frames                 as F
 import           Frames                 ((:->), (&:))
 import           Frames.CSV             as F
-import           Network.URI.Encode     as NetEncode
+import           Frames.InCore          as FI
 import qualified Pipes                  as P
-
--- state FIPS datatypes
-F.tableTypes "StateFIPSAndNames" "../conversion-data/states.csv"
 
 stateFIPSAndNamesCSV = "conversion-data/states.csv"
 
 -- state table is small so we can load it into memory.  No need to stream
-getStateFIPSFrame :: IO (F.Frame StateFIPSAndNames)
+getStateFIPSFrame :: IO (F.Frame CF.StateFIPSAndNames)
 getStateFIPSFrame = F.inCoreAoS $ F.readTable stateFIPSAndNamesCSV
 
 baseUrl = BaseUrl Https "api.census.gov" 443 "data"
 
 data Census_Routes route = Census_Routes
   {
-    _ACS :: route :- Capture "Year" Year :> "acs" :> Capture "span" Text :> QueryParam "get" Text :> QueryParam "for" Text :> QueryParam "in" Text :> QueryParam "key" Text :> Get '[JSON] A.Value
-  , _SAIPE :: route :- "timeseries" :> "poverty" :> "saipe" :>  QueryParam "get" Text :> QueryParam "for" Text :> QueryParam "in" Text :> QueryParam "time" Year :> QueryParam "key" Text :> Get '[JSON] A.Value
+    _ACS :: route :- Capture "Year" CF.Year :> "acs" :> Capture "span" Text :> QueryParam "get" Text :> QueryParam "for" Text :> QueryParam "in" Text :> QueryParam "key" Text :> Get '[JSON] A.Value
+  , _SAIPE :: route :- "timeseries" :> "poverty" :> "saipe" :>  QueryParam "get" Text :> QueryParam "for" Text :> QueryParam "in" Text :> QueryParam "time" CF.Year :> QueryParam "key" Text :> Get '[JSON] A.Value
   }
   deriving (Generic)
 
@@ -71,36 +74,33 @@ censusApiKey = "2a9aeb4cae45db2d5e7ce1c9d0622caf68e8de15"
 
 
 -- https://api.census.gov/data/2017/acs/acs5/variables
---data ACS_DataCode = C27018_002E
-type Year = Int
-type ACS_DataCode = Text
-
--- Want constructors that take smarter types, like a state/county or state/congressional district or whatever
-data GeoCode where
-  GeoCodeRawFor :: Text -> GeoCode
-  GeoCodeRawForIn :: Text -> Text -> GeoCode
-  AllStatesAndCounties :: GeoCode
-  AllStatesAndDistricts :: GeoCode
-  
-
-geoCodeToQuery :: GeoCode -> (Maybe Text, Maybe Text)
-geoCodeToQuery (GeoCodeRawFor forText) = (Just forText, Nothing)
-geoCodeToQuery (GeoCodeRawForIn forText inText) = (Just forText, Just inText)
-geoCodeToQuery AllStatesAndCounties = (Just "county:*", Just "state:*")
-geoCodeToQuery AllStatesAndDistricts = (Just "congressional district:*", Just "state:*")
-
 data ACS_Span = ACS1 | ACS3 | ACS5 deriving (Show,Enum,Eq,Ord,Bounded)
 acsSpanToText :: ACS_Span -> Text
 acsSpanToText ACS1 = "acs1"
 acsSpanToText ACS3 = "acs3"
 acsSpanToText ACS5 = "acs5"
 
-getACSData :: Year -> ACS_Span -> GeoCode -> [ACS_DataCode] -> ClientM A.Value
+getACSData :: CF.Year -> ACS_Span -> CF.GeoCode a -> [CF.ACS_DataCode] -> ClientM A.Value
 getACSData year span geoCode codes  =
-  let (forM, inM) = geoCodeToQuery geoCode
+  let (forM, inM) = CF.geoCodeToQuery geoCode
       getQ = Just $ intercalate "," codes
   in (_ACS censusClients) year (acsSpanToText span) getQ forM inM (Just censusApiKey)
 
+
+type ACSQueryFields fs gs = (CF.ACS_CodeList fs
+                            , RMap (gs V.++ fs)
+                            , V.ReifyConstraint Show V.ElField (gs V.++ fs)
+                            , V.RecordToList (gs V.++ fs)
+                            , FI.RecVec (gs V.++ fs)
+                            , F.ReadRec (gs V.++ fs))
+
+getACSDataFrame :: forall fs gs. ACSQueryFields fs gs
+                => CF.Year -> ACS_Span -> CF.GeoCode gs -> ClientM (F.FrameRec (gs V.++ fs))
+getACSDataFrame year span geoCode = do
+  let codes = CF.acsCodeList @fs
+  asAeson <- getACSData year span geoCode codes
+  liftIO $ FI.inCoreAoS $ jsonArraysToRecordPipe (return asAeson) P.>-> mapEither
+  
 --data ACSDataCode = ACS_MedianHouseholdIncome
 
 --acsDataCodeToText = "B19013"
@@ -128,23 +128,6 @@ saipeDataCodeToText Poverty0to4MOE           = "SAEPOV0_4_MOE"
 saipeDataCodeToText PovertyRate              = "SAEPOVRTALL_PT"
 saipeDataCodeToText PovertyCount             = "SAEPOVALL_PT"
 saipeDataCodeToText PovertyMOE               = "SAEPOVTALL_MOE"
-
---type StateFIPS = "stateFIPS" :-> Int
-declareColumn "CountyFIPS" ''Int -- = "countyFIPS" :-> Int
-declareColumn "CongressionalDistrict" ''Int -- = "countyFIPS" :-> Int
-type MedianHouseholdIncome = "median_household_income" :-> Int
-type MedianAge = "median_age" :-> Double
-type CollegeGrads = "college_grads" :-> Int
-type MedianHI_MOE = "medianHI_MOE" :-> Int
-type PovertyR = "povertyR" :-> Double
-type YearF = "year" :-> Int
-type EstPopulation = "estimated_population" :-> Int
-type SAIPE = '[MedianHouseholdIncome, MedianHI_MOE, PovertyR, YearF, StateFIPS, CountyFIPS]
-
-acsQueryFields = ["B01003_001E", "B19013_001E","B01002_001E","B06009_005E"]
-type ACSDataFields = '[EstPopulation, MedianHouseholdIncome, MedianAge, CollegeGrads]
-type ACSIdFields = '[StateFIPS, CongressionalDistrict]
-type ACSQueryFields = ACSDataFields V.++ ACSIdFields
 
 jsonTextArrayToList :: A.Value -> [Text]
 jsonTextArrayToList x = x ^.. L.values . L._String
@@ -178,10 +161,9 @@ eitherRecordPrint eRec =
     Left err -> liftIO $ putStrLn $ "Error: " ++ (unpack err)
     Right r  -> liftIO $ print r
 
-
-getSAIPEData :: Year -> GeoCode -> [SAIPEDataCode] -> ClientM A.Value
+getSAIPEData :: CF.Year -> CF.GeoCode a -> [SAIPEDataCode] -> ClientM A.Value
 getSAIPEData year geo vars =
-  let (forM, inM) = geoCodeToQuery geo
+  let (forM, inM) = CF.geoCodeToQuery geo
   in (_SAIPE censusClients) (Just $ intercalate "," $ (saipeDataCodeToText <$> vars)) forM inM (Just year) (Just censusApiKey)
 
 
