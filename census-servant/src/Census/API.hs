@@ -35,6 +35,7 @@ import           Data.Vector            (Vector)
 import qualified Data.Vector            as Vec
 import           Data.Vinyl             as V
 import           Data.Vinyl.Functor     as V
+import           Data.Vinyl.TypeLevel   as V
 import           Frames                 as F
 import           Frames                 ((:->), (&:))
 import           Frames.CSV             as F
@@ -54,7 +55,7 @@ baseUrl = BaseUrl Https "api.census.gov" 443 "data"
 
 data Census_Routes route = Census_Routes
   {
-    _ACS :: route :- Capture "Year" Year :> "acs" :> Capture "span" Text :> QueryParams "get" Text :> QueryParam "for" Text :> QueryParam "in" Text :> QueryParam "key" Text :> Get '[JSON] A.Value
+    _ACS :: route :- Capture "Year" Year :> "acs" :> Capture "span" Text :> QueryParam "get" Text :> QueryParam "for" Text :> QueryParam "in" Text :> QueryParam "key" Text :> Get '[JSON] A.Value
   , _SAIPE :: route :- "timeseries" :> "poverty" :> "saipe" :>  QueryParam "get" Text :> QueryParam "for" Text :> QueryParam "in" Text :> QueryParam "time" Year :> QueryParam "key" Text :> Get '[JSON] A.Value
   }
   deriving (Generic)
@@ -97,7 +98,8 @@ acsSpanToText ACS5 = "acs5"
 getACSData :: Year -> ACS_Span -> GeoCode -> [ACS_DataCode] -> ClientM A.Value
 getACSData year span geoCode codes  =
   let (forM, inM) = geoCodeToQuery geoCode
-  in (_ACS censusClients) year (acsSpanToText span) codes forM inM (Just censusApiKey)
+      getQ = Just $ intercalate "," codes
+  in (_ACS censusClients) year (acsSpanToText span) getQ forM inM (Just censusApiKey)
 
 --data ACSDataCode = ACS_MedianHouseholdIncome
 
@@ -129,13 +131,20 @@ saipeDataCodeToText PovertyMOE               = "SAEPOVTALL_MOE"
 
 --type StateFIPS = "stateFIPS" :-> Int
 declareColumn "CountyFIPS" ''Int -- = "countyFIPS" :-> Int
-declareColumn "CongressionalDistrict" ''Text -- = "countyFIPS" :-> Int
-type MedianHI = "medianHI" :-> Int
+declareColumn "CongressionalDistrict" ''Int -- = "countyFIPS" :-> Int
+type MedianHouseholdIncome = "median_household_income" :-> Int
+type MedianAge = "median_age" :-> Double
+type CollegeGrads = "college_grads" :-> Int
 type MedianHI_MOE = "medianHI_MOE" :-> Int
 type PovertyR = "povertyR" :-> Double
 type YearF = "year" :-> Int
-type SAIPE = '[MedianHI, MedianHI_MOE, PovertyR, YearF, StateFIPS, CountyFIPS]
-type ACS = '[MedianHI, StateFIPS, CongressionalDistrict, YearF]
+type EstPopulation = "estimated_population" :-> Int
+type SAIPE = '[MedianHouseholdIncome, MedianHI_MOE, PovertyR, YearF, StateFIPS, CountyFIPS]
+
+acsQueryFields = ["B01003_001E", "B19013_001E","B01002_001E","B06009_005E"]
+type ACSDataFields = '[EstPopulation, MedianHouseholdIncome, MedianAge, CollegeGrads]
+type ACSIdFields = '[StateFIPS, CongressionalDistrict]
+type ACSQueryFields = ACSDataFields V.++ ACSIdFields
 
 jsonTextArrayToList :: A.Value -> [Text]
 jsonTextArrayToList x = x ^.. L.values . L._String
@@ -154,9 +163,10 @@ jsonArraysOfTextToPipe mv = do
 jsonArraysToRecordPipe :: (F.ReadRec rs, Monad m, MonadIO m) => m A.Value -> P.Producer (F.Rec (Either Text :. F.ElField) rs) m ()
 jsonArraysToRecordPipe mv = jsonArraysOfTextToPipe mv P.>-> F.pipeTableEither
 
-mapEither :: Monad m => P.Pipe (F.Rec (Either Text :. F.ElField) rs) (F.Record rs) m ()
+mapEither :: (Monad m, MonadIO m, RMap rs, V.ReifyConstraint Show V.ElField rs, V.RecordToList rs) => P.Pipe (F.Rec (Either Text :. F.ElField) rs) (F.Record rs) m ()
 mapEither = do
   eRec <- P.await
+--  liftIO $ eitherRecordPrint eRec
   case (F.rtraverse V.getCompose eRec) of
     Left _ -> mapEither -- skip it
     Right r -> P.yield r >> mapEither 

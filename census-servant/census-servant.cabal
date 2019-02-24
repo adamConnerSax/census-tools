@@ -74,5 +74,6 @@ executable census-downloader
                      , servant-client
                      , servant-server
                      , text
+                     , vinyl
   hs-source-dirs:      census-downloader
   default-language:    Haskell2010
