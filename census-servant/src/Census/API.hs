@@ -78,11 +78,14 @@ data GeoCode where
   GeoCodeRawFor :: Text -> GeoCode
   GeoCodeRawForIn :: Text -> Text -> GeoCode
   AllStatesAndCounties :: GeoCode
+  AllStatesAndDistricts :: GeoCode
+  
 
 geoCodeToQuery :: GeoCode -> (Maybe Text, Maybe Text)
 geoCodeToQuery (GeoCodeRawFor forText) = (Just forText, Nothing)
 geoCodeToQuery (GeoCodeRawForIn forText inText) = (Just forText, Just inText)
 geoCodeToQuery AllStatesAndCounties = (Just "county:*", Just "state:*")
+geoCodeToQuery AllStatesAndDistricts = (Just "congressional district:*", Just "state:*")
 
 data ACS_Span = ACS1 | ACS3 | ACS5 deriving (Show,Enum,Eq,Ord,Bounded)
 acsSpanToText :: ACS_Span -> Text

@@ -15,7 +15,7 @@
 {-# LANGUAGE TypeOperators             #-}
 module Main where
 
-import           Census.API              as Census
+import qualified Census.API              as Census
 
 import           Control.Exception.Safe  (throw)
 import           Network.HTTP.Client     (Manager, defaultManagerSettings,
@@ -47,35 +47,51 @@ type FIPS = "fips" F.:-> Int
 main :: IO ()
 main = do
   let managerSettings = tlsManagerSettings -- { managerModifyRequest  =  (\req -> putStrLn (show req) >> return req) }
-  stateKeysFrame <- getStateFIPSFrame
+  stateKeysFrame <- Census.getStateFIPSFrame
   manager <- newManager managerSettings
   let clientEnv = mkClientEnv manager Census.baseUrl
       runServant x = runClientM x clientEnv
-  resFEs <- sequence $ fmap (\x -> putStr (show x ++ "...") >> getOneYear runServant stateKeysFrame x) ([1989,1993] ++ [1995..2017])
+  resFEs <- sequence $ fmap (\x -> putStr (show x ++ "...") >> getOneYear runServant stateKeysFrame x) ([2017])
   let (errors,resFs) = partitionEithers resFEs
   case (List.null errors) of
-    True  -> F.writeCSV "data/medianHIByCounty.csv" $ mconcat resFs
+    True  -> F.writeCSV "data/medianHIByDistrict.csv" $ mconcat resFs
     False -> putStrLn $ "Some queries returned errors: " ++ show errors
   return ()
 
 
 getOneYear :: (ClientM A.Value -> IO (Either ServantError A.Value))
-           -> F.Frame StateFIPSAndNames
-           -> Year
-           -> IO (Either ServantError (F.FrameRec '[FIPS, StateFIPS, CountyFIPS, Abbreviation, YearF, MedianHI, MedianHI_MOE, PovertyR]))
+           -> F.Frame Census.StateFIPSAndNames
+           -> Census.Year
+           -> IO (Either ServantError (F.FrameRec '[ FIPS
+                                                   , Census.StateFIPS
+                                                   , Census.CountyFIPS
+                                                   , Census.Abbreviation
+                                                   , Census.YearF
+                                                   , Census.MedianHI
+                                                   , Census.MedianHI_MOE
+                                                   , Census.PovertyR]))
 getOneYear runServant stateKeysFrame year = do
-  let allStatesAndCounties = AllStatesAndCounties
-      allInAlabama = GeoCodeRawForIn "county:*" "state:01"
-      query = Census.getSAIPEData year allStatesAndCounties [MedianHouseholdIncome, MedianHouseholdIncomeMOE,PovertyRate]
-      parsePipe :: IO A.Value -> P.Producer (F.Rec (Either F.Text F.:. F.ElField) SAIPE) IO () = jsonArraysToRecordPipe
+  let allStatesAndDistricts = Census.AllStatesAndDistricts
+      allInAlabama = Census.GeoCodeRawForIn "county:*" "state:01"
+      query = Census.getSAIPEData year allStatesAndDistricts [ Census.MedianHouseholdIncome
+                                                             , Census.MedianHouseholdIncomeMOE
+                                                             , Census.PovertyRate]
+      parsePipe :: IO A.Value -> P.Producer (F.Rec (Either F.Text F.:. F.ElField) Census.SAIPE) IO () = Census.jsonArraysToRecordPipe
   result <- runServant query
   case result of
     Left err -> return $ Left err
     Right x  -> Right <$> do
-      censusFrame <- FI.inCoreAoS $ parsePipe (return x) P.>-> mapEither
-      let withStateAbbrevsF = F.toFrame $ catMaybes $ fmap F.recMaybe $ F.leftJoin @'[StateFIPS] censusFrame stateKeysFrame
+      censusFrame <- FI.inCoreAoS $ parsePipe (return x) P.>-> Census.mapEither
+      let withStateAbbrevsF = F.toFrame $ catMaybes $ fmap F.recMaybe $ F.leftJoin @'[Census.StateFIPS] censusFrame stateKeysFrame
           addComboFIPS r = (r^.Census.stateFIPS * 1000 + r^.Census.countyFIPS) F.&: r
-          simplifiedF :: F.FrameRec '[FIPS, StateFIPS, CountyFIPS, Abbreviation, YearF, MedianHI, MedianHI_MOE, PovertyR] = addComboFIPS . F.rcast <$> withStateAbbrevsF
+          simplifiedF :: F.FrameRec '[FIPS
+                                     , Census.StateFIPS
+                                     , Census.CountyFIPS
+                                     , Census.Abbreviation
+                                     , Census.YearF
+                                     , Census.MedianHI
+                                     , Census.MedianHI_MOE
+                                     , Census.PovertyR] = addComboFIPS . F.rcast <$> withStateAbbrevsF
       return simplifiedF
 
 
