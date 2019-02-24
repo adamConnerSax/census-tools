@@ -47,7 +47,7 @@ import qualified Pipes                   as P
 import qualified Pipes.Prelude           as P
 import qualified Pipes.Safe              as P
 
-type ACSFields = [Census.Population, Census.MedianHouseholdIncome, Census.MedianAge, Census.CollegeGrads]
+type ACSFields = [Census.Population, Census.MedianHouseholdIncome, Census.MedianAge, Census.CollegeGrads, Census.AverageHouseholdSize, Census.PovertyCount]
 
 main :: IO ()
 main = do
@@ -66,13 +66,14 @@ main = do
 type ACSRes gs fs = ('[Census.StateAbbreviation] V.++ gs V.++ fs)
 
 getOneYear :: forall fs gs. (Census.ACSQueryFields fs gs
-                            , FI.RecVec ((gs V.++ fs) V.++ '[Census.StateName, Census.StateAbbreviation])
-                            , V.RMap ((gs V.++ fs) V.++ '[Census.StateName, Census.StateAbbreviation])
-                            , (gs V.++ fs) F.⊆ ((gs V.++ fs) V.++ '[Census.StateName, Census.StateAbbreviation])
-                            , F.ElemOf (gs V.++ fs) Census.StateFIPS
-                            , F.ElemOf  ((gs V.++ fs) V.++ '[Census.StateName, Census.StateAbbreviation]) Census.StateAbbreviation
+                            , FI.RecVec ((fs V.++ gs) V.++ '[Census.StateName, Census.StateAbbreviation])
+                            , V.RMap ((fs V.++ gs) V.++ '[Census.StateName, Census.StateAbbreviation])
+                            , (fs V.++ gs) F.⊆ ((fs V.++ gs) V.++ '[Census.StateName, Census.StateAbbreviation])
+                            , (gs V.++ fs) F.⊆ ((fs V.++ gs) V.++ '[Census.StateName, Census.StateAbbreviation])
+                            , F.ElemOf (fs V.++ gs) Census.StateFIPS
+                            , F.ElemOf  ((fs V.++ gs) V.++ '[Census.StateName, Census.StateAbbreviation]) Census.StateAbbreviation
                             {-, F.Elem (fs V.++ gs) Census.StateFIPS-})
-           => (ClientM (F.FrameRec (gs V.++ fs)) -> IO (Either ServantError (F.FrameRec (gs V.++ fs))))
+           => (ClientM (F.FrameRec (fs V.++ gs)) -> IO (Either ServantError (F.FrameRec (fs V.++ gs))))
            -> F.Frame Census.StateFIPSAndNames
            -> Census.GeoCode gs
            -> Census.Year

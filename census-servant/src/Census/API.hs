@@ -88,14 +88,14 @@ getACSData year span geoCode codes  =
 
 
 type ACSQueryFields fs gs = (CF.ACS_CodeList fs
-                            , RMap (gs V.++ fs)
-                            , V.ReifyConstraint Show V.ElField (gs V.++ fs)
-                            , V.RecordToList (gs V.++ fs)
-                            , FI.RecVec (gs V.++ fs)
-                            , F.ReadRec (gs V.++ fs))
+                            , RMap (fs V.++ gs)
+                            , V.ReifyConstraint Show V.ElField (fs V.++ gs)
+                            , V.RecordToList (fs V.++ gs)
+                            , FI.RecVec (fs V.++ gs)
+                            , F.ReadRec (fs V.++ gs))
 
 getACSDataFrame :: forall fs gs. ACSQueryFields fs gs
-                => CF.Year -> ACS_Span -> CF.GeoCode gs -> ClientM (F.FrameRec (gs V.++ fs))
+                => CF.Year -> ACS_Span -> CF.GeoCode gs -> ClientM (F.FrameRec (fs V.++ gs))
 getACSDataFrame year span geoCode = do
   let codes = CF.acsCodeList @fs
   asAeson <- getACSData year span geoCode codes

@@ -29,8 +29,6 @@ import qualified Frames               ((:->), (&:))
 -- state FIPS datatypes
 F.tableTypes "StateFIPSAndNames" "../conversion-data/states.csv"  -- declares StateName, StateFIPS, StateAbbreviation
 
---declareColumn "StateFIPS" ''Int
-
 F.declareColumn "CountyFIPS" ''Int -- = "countyFIPS" :-> Int
 F.declareColumn "CongressionalDistrict" ''Int -- = "countyFIPS" :-> Int
 
@@ -38,10 +36,6 @@ type Year = Int
 F.declareColumn "YearF" ''Year
 
 
-type ACS_DataCode = Text
-
---data GeoQueryItem a = AllInCategory | Only a
---type GeoSpecifier a = Maybe Text -- phantom type to hold field
 
 -- Want constructors that take smarter types, like a state/county or state/congressional district or whatever
 data GeoCode a where
@@ -53,6 +47,8 @@ geoCodeToQuery :: GeoCode a -> (Maybe Text, Maybe Text)
 --geoCodeToQuery (GeoCodeRawForIn forText inText) = (Just forText, Just inText)
 geoCodeToQuery AllStatesAndCounties = (Just "county:*", Just "state:*")
 geoCodeToQuery AllStatesAndDistricts = (Just "congressional district:*", Just "state:*")
+
+type ACS_DataCode = Text
 
 class ACS_Code a where
   acsCode :: ACS_DataCode
@@ -103,6 +99,22 @@ instance SAIPE_Code MedianHouseholdIncomeMOE where
 F.declareColumn "PovertyRate" ''Double -- PovertyR = "povertyR" :-> Double
 instance SAIPE_Code PovertyRate where
   saipeCode = "SAEPOVRTALL_PT"
+
+F.declareColumn "AverageHouseholdSize" ''Double
+instance ACS_Code AverageHouseholdSize where
+  acsCode = "B25010_001E"
+
+F.declareColumn "PovertyCount" ''Int
+instance ACS_Code PovertyCount where
+  acsCode = "B17001_002E"
+
+
+
+
+
+---
+
+
 
 
 data SAIPEDataCode = MedianHouseholdIncome |
