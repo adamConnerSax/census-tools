@@ -38,6 +38,7 @@ import           Data.Vinyl.Functor     as V
 import           Frames                 as F
 import           Frames                 ((:->), (&:))
 import           Frames.CSV             as F
+import           Network.URI.Encode     as NetEncode
 import qualified Pipes                  as P
 
 -- state FIPS datatypes
@@ -93,10 +94,14 @@ acsSpanToText ACS1 = "acs1"
 acsSpanToText ACS3 = "acs3"
 acsSpanToText ACS5 = "acs5"
 
-getACSData :: Year -> ACS_Span -> [ACS_DataCode] -> GeoCode -> ClientM A.Value
-getACSData year span codes geoCode =
+getACSData :: Year -> ACS_Span -> GeoCode -> [ACS_DataCode] -> ClientM A.Value
+getACSData year span geoCode codes  =
   let (forM, inM) = geoCodeToQuery geoCode
   in (_ACS censusClients) year (acsSpanToText span) codes forM inM (Just censusApiKey)
+
+--data ACSDataCode = ACS_MedianHouseholdIncome
+
+--acsDataCodeToText = "B19013"
 
 data SAIPEDataCode = MedianHouseholdIncome |
                      MedianHouseholdIncomeMOE |
@@ -124,11 +129,13 @@ saipeDataCodeToText PovertyMOE               = "SAEPOVTALL_MOE"
 
 --type StateFIPS = "stateFIPS" :-> Int
 declareColumn "CountyFIPS" ''Int -- = "countyFIPS" :-> Int
+declareColumn "CongressionalDistrict" ''Text -- = "countyFIPS" :-> Int
 type MedianHI = "medianHI" :-> Int
 type MedianHI_MOE = "medianHI_MOE" :-> Int
 type PovertyR = "povertyR" :-> Double
 type YearF = "year" :-> Int
 type SAIPE = '[MedianHI, MedianHI_MOE, PovertyR, YearF, StateFIPS, CountyFIPS]
+type ACS = '[MedianHI, StateFIPS, CongressionalDistrict, YearF]
 
 jsonTextArrayToList :: A.Value -> [Text]
 jsonTextArrayToList x = x ^.. L.values . L._String
