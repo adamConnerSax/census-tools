@@ -87,17 +87,17 @@ getACSData year span geoCode codes  =
   in (_ACS censusClients) year (acsSpanToText span) getQ forM inM (Just censusApiKey)
 
 
-type ACSQueryFields gs fs = ( CF.QueryFields CF.ACS fs
-                            , ColumnHeaders (CF.QueryCodes CF.ACS fs)
-                            , gs F.⊆ ((CF.QueryCodes CF.ACS fs) V.++ gs)
-                            , (CF.QueryCodes CF.ACS fs) F.⊆ ((CF.QueryCodes CF.ACS fs) V.++ gs)
-                            , V.RecordToList ((CF.QueryCodes CF.ACS fs) V.++ gs)
-                            , V.ReifyConstraint Show V.ElField ((CF.QueryCodes CF.ACS fs) V.++ gs)
-                            , RMap ((CF.QueryCodes CF.ACS fs) V.++ gs)
-                            , FI.RecVec ((CF.QueryCodes CF.ACS fs) V.++ gs)
-                            , F.ReadRec ((CF.QueryCodes CF.ACS fs) V.++ gs))
+type QueryFieldsC d gs fs = ( CF.QueryFields d fs
+                            , ColumnHeaders (CF.QueryCodes d fs)
+                            , gs F.⊆ ((CF.QueryCodes d fs) V.++ gs)
+                            , (CF.QueryCodes d fs) F.⊆ ((CF.QueryCodes d fs) V.++ gs)
+                            , V.RecordToList ((CF.QueryCodes d fs) V.++ gs)
+                            , V.ReifyConstraint Show V.ElField ((CF.QueryCodes d fs) V.++ gs)
+                            , RMap ((CF.QueryCodes d fs) V.++ gs)
+                            , FI.RecVec ((CF.QueryCodes d fs) V.++ gs)
+                            , F.ReadRec ((CF.QueryCodes d fs) V.++ gs))
                             
-getACSDataFrame :: forall fs gs. ACSQueryFields gs fs
+getACSDataFrame :: forall fs gs. QueryFieldsC CF.ACS gs fs
                 => CF.Year -> ACS_Span -> CF.GeoCode gs -> ClientM (F.FrameRec (gs V.++ fs))
 getACSDataFrame year span geoCode = do
   asAeson <- getACSData year span geoCode (CF.queryCodes @CF.ACS @fs) 
@@ -138,10 +138,19 @@ eitherRecordPrint eRec =
     Left err -> liftIO $ putStrLn $ "Error: " ++ (unpack err)
     Right r  -> liftIO $ print r
 
-{-
-getSAIPEData :: CF.Year -> CF.GeoCode a -> [CF.SAIPEDataCode] -> ClientM A.Value
-getSAIPEData year geo vars =
+
+getSAIPEData :: CF.Year -> CF.GeoCode a -> [Text] -> ClientM A.Value
+getSAIPEData year geo codes =
   let (forM, inM) = CF.geoCodeToQuery geo
-  in (_SAIPE censusClients) (Just $ intercalate "," $ (saipeDataCodeToText <$> vars)) forM inM (Just year) (Just censusApiKey)
--}
+  in (_SAIPE censusClients) (Just $ intercalate "," codes) forM inM (Just year) (Just censusApiKey)
+
+
+getSAIPEDataFrame :: forall fs gs. QueryFieldsC CF.SAIPE gs fs
+                  => CF.Year -> CF.GeoCode gs -> ClientM (F.FrameRec (gs V.++ fs))
+getSAIPEDataFrame year geoCode = do
+  asAeson <- getSAIPEData year geoCode (CF.queryCodes @CF.SAIPE @fs) 
+  rawFrame :: F.FrameRec ((CF.QueryCodes CF.SAIPE fs) V.++ gs) <- liftIO $ FI.inCoreAoS $ jsonArraysToRecordPipe (return asAeson) P.>-> mapEither
+  let f r =  (F.rcast @gs r) F.<+> (CF.makeRec @CF.SAIPE @fs $ F.rcast r)
+  return $ fmap f rawFrame 
+  
 

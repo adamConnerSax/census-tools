@@ -65,7 +65,7 @@ main = do
 
 type ACSRes gs fs = ('[Census.StateAbbreviation] V.++ gs V.++ fs)
 
-getOneYear :: forall fs gs. (Census.ACSQueryFields gs fs
+getOneYear :: forall fs gs. (Census.QueryFieldsC Census.ACS gs fs
                             , V.RMap (gs V.++ fs)
                             , FI.RecVec (gs V.++ fs)
                             , FI.RecVec ((gs V.++ fs) V.++ '[Census.StateName, Census.StateAbbreviation])
