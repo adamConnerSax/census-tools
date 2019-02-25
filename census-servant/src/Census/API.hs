@@ -80,54 +80,31 @@ acsSpanToText ACS1 = "acs1"
 acsSpanToText ACS3 = "acs3"
 acsSpanToText ACS5 = "acs5"
 
-getACSData :: CF.Year -> ACS_Span -> CF.GeoCode a -> [CF.ACS_DataCode] -> ClientM A.Value
+getACSData :: CF.Year -> ACS_Span -> CF.GeoCode a -> [Text] -> ClientM A.Value
 getACSData year span geoCode codes  =
   let (forM, inM) = CF.geoCodeToQuery geoCode
       getQ = Just $ intercalate "," codes
   in (_ACS censusClients) year (acsSpanToText span) getQ forM inM (Just censusApiKey)
 
 
-type ACSQueryFields fs gs = (CF.ACS_CodeList fs
-                            , RMap (fs V.++ gs)
-                            , V.ReifyConstraint Show V.ElField (fs V.++ gs)
-                            , V.RecordToList (fs V.++ gs)
-                            , FI.RecVec (fs V.++ gs)
-                            , F.ReadRec (fs V.++ gs))
-
-getACSDataFrame :: forall fs gs. ACSQueryFields fs gs
-                => CF.Year -> ACS_Span -> CF.GeoCode gs -> ClientM (F.FrameRec (fs V.++ gs))
+type ACSQueryFields gs fs = ( CF.QueryFields CF.ACS fs
+                            , ColumnHeaders (CF.QueryCodes CF.ACS fs)
+                            , gs F.⊆ ((CF.QueryCodes CF.ACS fs) V.++ gs)
+                            , (CF.QueryCodes CF.ACS fs) F.⊆ ((CF.QueryCodes CF.ACS fs) V.++ gs)
+                            , V.RecordToList ((CF.QueryCodes CF.ACS fs) V.++ gs)
+                            , V.ReifyConstraint Show V.ElField ((CF.QueryCodes CF.ACS fs) V.++ gs)
+                            , RMap ((CF.QueryCodes CF.ACS fs) V.++ gs)
+                            , FI.RecVec ((CF.QueryCodes CF.ACS fs) V.++ gs)
+                            , F.ReadRec ((CF.QueryCodes CF.ACS fs) V.++ gs))
+                            
+getACSDataFrame :: forall fs gs. ACSQueryFields gs fs
+                => CF.Year -> ACS_Span -> CF.GeoCode gs -> ClientM (F.FrameRec (gs V.++ fs))
 getACSDataFrame year span geoCode = do
-  let codes = CF.acsCodeList @fs
-  asAeson <- getACSData year span geoCode codes
-  liftIO $ FI.inCoreAoS $ jsonArraysToRecordPipe (return asAeson) P.>-> mapEither
+  asAeson <- getACSData year span geoCode (CF.queryCodes @CF.ACS @fs) 
+  rawFrame :: F.FrameRec ((CF.QueryCodes CF.ACS fs) V.++ gs) <- liftIO $ FI.inCoreAoS $ jsonArraysToRecordPipe (return asAeson) P.>-> mapEither
+  let f r =  (F.rcast @gs r) F.<+> (CF.makeRec @CF.ACS @fs $ F.rcast r)
+  return $ fmap f rawFrame 
   
---data ACSDataCode = ACS_MedianHouseholdIncome
-
---acsDataCodeToText = "B19013"
-
-data SAIPEDataCode = MedianHouseholdIncome |
-                     MedianHouseholdIncomeMOE |
-                     Poverty0to17Rate |
-                     Poverty0to17Count |
-                     Poverty0to17MOE |
-                     Poverty0to4Rate |
-                     Poverty0to4Count |
-                     Poverty0to4MOE |
-                     PovertyRate |
-                     PovertyCount |
-                     PovertyMOE
-
-saipeDataCodeToText MedianHouseholdIncome    = "SAEMHI_PT"
-saipeDataCodeToText MedianHouseholdIncomeMOE = "SAEMHI_MOE"
-saipeDataCodeToText Poverty0to17Rate         = "SAEPOVRTO_17_PT"
-saipeDataCodeToText Poverty0to17Count        = "SAEPOV0_17_PT"
-saipeDataCodeToText Poverty0to17MOE          = "SAEPOV0_17_MOE"
-saipeDataCodeToText Poverty0to4Rate          = "SAEPOVRT0_4_PT"
-saipeDataCodeToText Poverty0to4Count         = "SAEPOVT0_4_PT"
-saipeDataCodeToText Poverty0to4MOE           = "SAEPOV0_4_MOE"
-saipeDataCodeToText PovertyRate              = "SAEPOVRTALL_PT"
-saipeDataCodeToText PovertyCount             = "SAEPOVALL_PT"
-saipeDataCodeToText PovertyMOE               = "SAEPOVTALL_MOE"
 
 jsonTextArrayToList :: A.Value -> [Text]
 jsonTextArrayToList x = x ^.. L.values . L._String
@@ -161,9 +138,10 @@ eitherRecordPrint eRec =
     Left err -> liftIO $ putStrLn $ "Error: " ++ (unpack err)
     Right r  -> liftIO $ print r
 
-getSAIPEData :: CF.Year -> CF.GeoCode a -> [SAIPEDataCode] -> ClientM A.Value
+{-
+getSAIPEData :: CF.Year -> CF.GeoCode a -> [CF.SAIPEDataCode] -> ClientM A.Value
 getSAIPEData year geo vars =
   let (forM, inM) = CF.geoCodeToQuery geo
   in (_SAIPE censusClients) (Just $ intercalate "," $ (saipeDataCodeToText <$> vars)) forM inM (Just year) (Just censusApiKey)
-
+-}
 
