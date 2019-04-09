@@ -24,7 +24,7 @@ import           Network.HTTP.Client     (Manager, defaultManagerSettings,
                                           managerModifyRequest, newManager)
 import           Network.HTTP.Client.TLS (tlsManagerSettings)
 import           Servant
-import           Servant.Client          (ClientM, ServantError, mkClientEnv,
+import           Servant.Client          (ClientM, ClientError, mkClientEnv,
                                           runClientM)
 
 import           Control.Lens            ((^.))
@@ -74,11 +74,11 @@ getOneYear :: forall fs gs. (Census.QueryFieldsC Census.ACS gs fs
                             , F.ElemOf (gs V.++ fs) Census.StateFIPS
                             , F.ElemOf  ((gs V.++ fs) V.++ '[Census.StateName, Census.StateAbbreviation]) Census.StateAbbreviation
                             {-, F.Elem (fs V.++ gs) Census.StateFIPS-})
-           => (ClientM (F.FrameRec (gs V.++ fs)) -> IO (Either ServantError (F.FrameRec (gs V.++ fs))))
+           => (ClientM (F.FrameRec (gs V.++ fs)) -> IO (Either ClientError (F.FrameRec (gs V.++ fs))))
            -> F.Frame Census.StateFIPSAndNames
            -> Census.GeoCode gs
            -> Census.Year
-           -> IO (Either ServantError (F.FrameRec (ACSRes gs fs)))
+           -> IO (Either ClientError (F.FrameRec (ACSRes gs fs)))
 getOneYear runServant stateKeysFrame geoCode year = do
   let acsQuery = Census.getACSDataFrame @fs year Census.ACS1 geoCode
   result <- runServant acsQuery
