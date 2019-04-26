@@ -47,7 +47,7 @@ import qualified Pipes                   as P
 import qualified Pipes.Prelude           as P
 import qualified Pipes.Safe              as P
 
-type ACSFields = [Census.Population, Census.MedianHouseholdIncome, Census.MedianAge, Census.CollegeGradPct, Census.AverageHouseholdSize, Census.PovertyRate]
+type ACSFields = [Census.Population, Census.WMY, Census.WMO, Census.WFY, Census.WFO,Census.BMY,Census.BMO,Census.BFY,Census.BFO]
 
 main :: IO ()
 main = do
@@ -59,7 +59,7 @@ main = do
   resFEs <- sequence $ fmap (\x -> putStr (show x ++ "...") >> getOneYear @ACSFields runServant stateKeysFrame Census.AllStatesAndDistricts x) ([2017])
   let (errors,resFs) = partitionEithers resFEs
   case (List.null errors) of
-    True  -> F.writeCSV "data/popByDistrict.csv" $ mconcat resFs
+    True  -> F.writeCSV "data/demogaphicsByDistrict.csv" $ mconcat resFs
     False -> putStrLn $ "Some queries returned errors: " ++ show errors
   return ()
 

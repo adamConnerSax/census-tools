@@ -21,6 +21,7 @@ allow-newer: true
 library
   exposed-modules: Census.API
                  , Census.Fields
+  ghc-options:         -O0                 
   -- other-modules:
   -- other-extensions:
   build-depends:       base >=4.11.1.0
@@ -43,6 +44,7 @@ library
                      , servant-server
                      , servant
                      , transformers
+                     , type-level-sets
                      , vinyl
                      , warp
                      , http-api-data
