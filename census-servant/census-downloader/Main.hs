@@ -47,7 +47,9 @@ import qualified Pipes                   as P
 import qualified Pipes.Prelude           as P
 import qualified Pipes.Safe              as P
 
-type ACSFields = [Census.Population, Census.WMY, Census.WMO, Census.WFY, Census.WFO,Census.BMY,Census.BMO,Census.BFY,Census.BFO]
+type ACSFields = [Census.Population, Census.WMY, Census.WMO, Census.WFY, Census.WFO, Census.NWMY, Census.NWMO, Census.NWFY, Census.NWFO]
+
+--                  Census.WFO,Census.BMY,Census.BMO,Census.BFY,Census.BFO]
 
 main :: IO ()
 main = do

@@ -213,11 +213,28 @@ do anything meaningful and the census only tracks so many things. Still.
 -}
 
 type B01001_001E = "B01001_001E" F.:-> Int -- total unweighted count, our denominator
-type B01001A_001E = "B01001A_001E" F.:-> Int -- W
+type B01001_002E = "B01001_002E" F.:-> Int -- total male
+type B01001_003E = "B01001_003E" F.:-> Int -- M < 5
+type B01001_004E = "B01001_004E" F.:-> Int -- M 5-9
+type B01001_005E = "B01001_005E" F.:-> Int -- M 10-14
+type B01001_006E = "B01001_006E" F.:-> Int -- M 15-17
+type B01001_007E = "B01001_007E" F.:-> Int -- M 18-19
+type B01001_008E = "B01001_008E" F.:-> Int -- M 20
+type B01001_009E = "B01001_009E" F.:-> Int -- M 21
+type B01001_010E = "B01001_010E" F.:-> Int -- M 22-24
+type B01001_011E = "B01001_011E" F.:-> Int -- M 25-29
+type B01001_012E = "B01001_012E" F.:-> Int -- M 30-34
+type B01001_013E = "B01001_013E" F.:-> Int -- M 35-39
+type B01001_014E = "B01001_014E" F.:-> Int -- M 40-44
 
+type MYCodes = [B01001_003E, B01001_004E, B01001_005E, B01001_006E, B01001_007E, B01001_008E, B01001_009E, B01001_010E, B01001_011E, B01001_012E, B01001_013E, B01001_014E]
+
+type B01001A_001E = "B01001A_001E" F.:-> Int -- W
 type B01001A_002E = "B01001A_002E" F.:-> Int -- WM
 F.declareColumn "WMY" '' Double
 F.declareColumn "WMO" '' Double
+F.declareColumn "NWMY" '' Double
+F.declareColumn "NWMO" '' Double
 type B01001A_003E = "B01001A_003E" F.:-> Int -- WM < 5
 type B01001A_004E = "B01001A_004E" F.:-> Int -- WM 5-9
 type B01001A_005E = "B01001A_005E" F.:-> Int -- WM 10-14
@@ -244,9 +261,48 @@ instance QueryField ACS WMO where
         wmy = Fold.foldl' (+) 0 (F.recToList $ F.rcast @WMYCodes r)
     in realToFrac (wm - wmy)/realToFrac tot
 
+instance QueryField ACS NWMY where
+  type FieldCodes ACS NWMY = (B01001_001E ': (WMYCodes V.++ MYCodes)) 
+  makeField r =
+    let tot = F.rgetField @B01001_001E r
+        my = Fold.foldl' (+) 0 (F.recToList $ F.rcast @MYCodes r)
+        wmy = Fold.foldl' (+) 0 (F.recToList $ F.rcast @WMYCodes r)
+    in realToFrac (my - wmy)/realToFrac tot
+
+instance QueryField ACS NWMO where
+  type FieldCodes ACS NWMO =  (B01001_001E ': B01001_002E ': B01001A_002E ': (WMYCodes V.++ MYCodes))
+  makeField r =
+    let tot = F.rgetField @B01001_001E r
+        m = F.rgetField @B01001_002E r 
+        wm = F.rgetField @B01001A_002E r
+        my = Fold.foldl' (+) 0 (F.recToList $ F.rcast @MYCodes r)
+        wmy = Fold.foldl' (+) 0 (F.recToList $ F.rcast @WMYCodes r)
+        mo = m - my
+        wmo = wm - wmy
+    in realToFrac (mo - wmo)/realToFrac tot
+
+type B01001_026E = "B01001_026E" F.:-> Int -- total female
+type B01001_027E = "B01001_027E" F.:-> Int -- F < 5
+type B01001_028E = "B01001_028E" F.:-> Int -- F 5-9
+type B01001_029E = "B01001_029E" F.:-> Int -- F 10-14
+type B01001_030E = "B01001_030E" F.:-> Int -- F 15-17
+type B01001_031E = "B01001_031E" F.:-> Int -- F 18-19
+type B01001_032E = "B01001_032E" F.:-> Int -- F 20
+type B01001_033E = "B01001_033E" F.:-> Int -- F 21
+type B01001_034E = "B01001_034E" F.:-> Int -- F 22-24
+type B01001_035E = "B01001_035E" F.:-> Int -- F 25-29
+type B01001_036E = "B01001_036E" F.:-> Int -- F 30-34
+type B01001_037E = "B01001_037E" F.:-> Int -- F 35-39
+type B01001_038E = "B01001_038E" F.:-> Int -- F 40-44
+
+type FYCodes =[B01001_027E, B01001_028E, B01001_029E, B01001_030E, B01001_031E, B01001_032E, B01001_033E, B01001_034E, B01001_035E, B01001_036E, B01001_037E, B01001_038E]
+
+
 type B01001A_017E = "B01001A_017E" F.:-> Int -- WF
 F.declareColumn "WFY" '' Double
 F.declareColumn "WFO" '' Double
+F.declareColumn "NWFY" '' Double
+F.declareColumn "NWFO" '' Double
 type B01001A_018E = "B01001A_018E" F.:-> Int -- WF < 5
 type B01001A_019E = "B01001A_019E" F.:-> Int -- WF 5-9
 type B01001A_020E = "B01001A_020E" F.:-> Int -- WF 10-14
@@ -272,6 +328,28 @@ instance QueryField ACS WFO where
         wf = F.rgetField @B01001A_017E r
         wfy = Fold.foldl' (+) 0 (F.recToList $ F.rcast @WFYCodes r)
     in realToFrac (wf - wfy)/realToFrac tot
+
+
+instance QueryField ACS NWFY where
+  type FieldCodes ACS NWFY = (B01001_001E ': (WFYCodes V.++ FYCodes)) 
+  makeField r =
+    let tot = F.rgetField @B01001_001E r
+        fy = Fold.foldl' (+) 0 (F.recToList $ F.rcast @FYCodes r)
+        wfy = Fold.foldl' (+) 0 (F.recToList $ F.rcast @WFYCodes r)
+    in realToFrac (fy - wfy)/realToFrac tot
+
+instance QueryField ACS NWFO where
+  type FieldCodes ACS NWFO =  (B01001_001E ': B01001_026E ': B01001A_017E ': (WFYCodes V.++ FYCodes))
+  makeField r =
+    let tot = F.rgetField @B01001_001E r
+        f = F.rgetField @B01001_026E r 
+        wf = F.rgetField @B01001A_017E r
+        fy = Fold.foldl' (+) 0 (F.recToList $ F.rcast @FYCodes r)
+        wfy = Fold.foldl' (+) 0 (F.recToList $ F.rcast @WFYCodes r)
+        fo = f - fy
+        wfo = wf - wfy
+    in realToFrac (fo - wfo)/realToFrac tot
+
 
 type B01001B_002E = "B01001B_002E" F.:-> Int -- BM
 F.declareColumn "BMY" '' Double
