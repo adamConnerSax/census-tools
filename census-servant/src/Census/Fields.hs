@@ -70,21 +70,27 @@ class ComputedField (b :: DataSet) (a :: (Symbol,Type)) where
   type FieldNeeds b a :: [(Symbol, Type)] -- these will be like ("B17001_001E" :: KnownSymbol,Int)
   makeField :: F.Record (FieldNeeds b a) -> V.Snd a
 
-{-
+
 class ComputedFields (b :: DataSet) (cfs :: [(Symbol,Type)]) where
-  type FieldsNeed b cf :: [(Symbol,Type)]
-  makeCRec :: F.Record (FieldsNeed b cf) -> F.Record cfs
+  type FieldsNeed b cfs :: [(Symbol,Type)]
+  makeCRec :: F.Record (FieldsNeed b cfs) -> F.Record cfs
 
 instance ComputedFields b '[] where
   type FieldsNeed b '[] = '[]
   makeCRec _ = V.RNil
 
-instance (V.KnownField cf, ComputedFields b cfs, ComputedField b cf, (FieldNeeds b cf) F.⊆ (FieldsNeed b (cf ': cfs)) => ComputedFields b (cf ': cfs)) where
+instance (V.KnownField cf
+         , ComputedFields b cfs
+         , ComputedField b cf
+         , (FieldNeeds b cf) F.⊆ (FieldsNeed b (cf ': cfs))
+         , (FieldsNeed b cfs)  F.⊆ ((FieldNeeds b cf) V.++ (FieldsNeed b cfs))
+         ) => ComputedFields b (cf ': cfs) where
   type FieldsNeed b (cf ': cfs) = (FieldNeeds b cf) V.++ (FieldsNeed b cfs) -- these shouldn't overlap.  We could nub them but that's v slow
   makeCRec xs =
-    let newField = makeField @b @cf $ F.rcast xs
+    let newField = V.Field $ makeField @b @cf $ F.rcast xs
     in newField V.:& (makeCRec @b @cfs $ F.rcast xs)
--}
+
+
 class QueryFields  (b :: DataSet) (as ::[(Symbol,Type)]) where
   type QueryCodes b as :: [(Symbol, Type)]
   makeQRec :: F.Record (QueryCodes b as) -> F.Record as
@@ -116,7 +122,12 @@ instance QueryFields b '[] where
   type QueryCodes b '[] = '[]
   makeQRec _ = V.RNil
 
-instance (V.KnownField r, QueryFields b rs, ComputedField b r, (FieldNeeds b r) F.⊆ (QueryCodes b (r ': rs)), (QueryCodes b rs) F.⊆ (QueryCodes b (r ': rs))) => QueryFields b (r ': rs) where
+instance (V.KnownField r
+         , QueryFields b rs
+         , ComputedField b r
+         , (FieldNeeds b r) F.⊆ (QueryCodes b (r ': rs))
+         , (QueryCodes b rs) F.⊆ (QueryCodes b (r ': rs))
+         ) => QueryFields b (r ': rs) where
   type QueryCodes b (r ': rs) = Nub ((FieldNeeds b r) V.++ (QueryCodes b rs)) -- don't duplicate fields.
   makeQRec qs =
     let newField = V.Field (makeField @b @r $ F.rcast qs)
@@ -224,6 +235,13 @@ do anything meaningful and the census only tracks so many things. Still.
 -}
 
 type B01001_001E = "B01001_001E" F.:-> Int -- total unweighted count, our denominator
+
+type AllCount = "AllCount" F.:-> Int
+instance ComputedField ACS AllCount where
+  type FieldNeeds ACS AllCount = '[B01001_001E]
+  makeField = F.rgetField @B01001_001E
+
+
 type B01001_002E = "B01001_002E" F.:-> Int -- total male
 type B01001_003E = "B01001_003E" F.:-> Int -- M < 5
 type B01001_004E = "B01001_004E" F.:-> Int -- M 5-9
@@ -240,6 +258,17 @@ type B01001_014E = "B01001_014E" F.:-> Int -- M 40-44
 
 type MYCodes = [B01001_003E, B01001_004E, B01001_005E, B01001_006E, B01001_007E, B01001_008E, B01001_009E, B01001_010E, B01001_011E, B01001_012E, B01001_013E, B01001_014E]
 
+type MaleCount = "MaleCount" F.:-> Int
+instance ComputedField ACS MaleCount where
+  type  FieldNeeds ACS MaleCount = '[B01001_002E]
+  makeField = F.rgetField @B01001_002E
+
+type YoungMaleCount = "YoungMaleCount" F.:-> Int
+instance ComputedField ACS YoungMaleCount where
+  type FieldNeeds ACS YoungMaleCount = MYCodes
+  makeField r = Fold.foldl' (+) 0 (F.recToList $ F.rcast @MYCodes r)
+
+
 type B01001A_001E = "B01001A_001E" F.:-> Int -- W
 type B01001A_002E = "B01001A_002E" F.:-> Int -- WM
 F.declareColumn "WMY" '' Double
@@ -255,8 +284,19 @@ type B01001A_008E = "B01001A_008E" F.:-> Int -- WM 20-24
 type B01001A_009E = "B01001A_009E" F.:-> Int -- WM 25-29
 type B01001A_010E = "B01001A_010E" F.:-> Int -- WM 30-34
 type B01001A_011E = "B01001A_011E" F.:-> Int -- WM 35-44
-
 type WMYCodes = [B01001A_003E,B01001A_004E,B01001A_005E,B01001A_006E,B01001A_007E,B01001A_008E,B01001A_009E,B01001A_010E,B01001A_011E]
+
+type WhiteMaleCount = "WhiteMaleCount" F.:-> Int
+instance ComputedField ACS WhiteMaleCount where
+  type FieldNeeds ACS WhiteMaleCount = '[B01001A_002E]
+  makeField = F.rgetField @B01001A_002E
+
+type YoungWhiteMaleCount = "YoungWhiteMaleCount" F.:-> Int
+instance ComputedField ACS YoungWhiteMaleCount where
+  type FieldNeeds ACS YoungWhiteMaleCount = WMYCodes
+  makeField r = Fold.foldl' (+) 0 (F.recToList $ F.rcast @WMYCodes r)
+
+
 instance ComputedField ACS WMY where
   type FieldNeeds ACS WMY = (B01001_001E ': WMYCodes)
   makeField r =
