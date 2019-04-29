@@ -16,6 +16,7 @@
 {-# LANGUAGE AllowAmbiguousTypes       #-}
 module Census.API where
 
+import qualified Census.ComputedFields         as CF
 import qualified Census.Fields                 as CF
 
 import           Servant
@@ -37,6 +38,7 @@ import           Control.Monad                  ( forM_
 import           Control.Monad.IO.Class         ( MonadIO
                                                 , liftIO
                                                 )
+import qualified Control.Monad.Except          as X
 import qualified Data.Aeson                    as A
 import qualified Data.Aeson.Lens               as L
 import           Data.ByteString.Lazy           ( fromStrict )
@@ -44,9 +46,12 @@ import qualified Data.Foldable                 as F
 import qualified Data.List                     as List
 import           Data.Maybe                     ( fromMaybe )
 import           Data.Monoid                    ( (<>) )
+import           Data.Proxy                     ( Proxy() )
+import qualified Data.Set                      as S
 import           Data.Text                      ( Text
                                                 , intercalate
                                                 , unpack
+                                                , pack
                                                 )
 import           Data.Text.Encoding             ( encodeUtf8 )
 import           Data.Vector                    ( Vector )
@@ -94,6 +99,7 @@ acsSpanToText ACS1 = "acs1"
 acsSpanToText ACS3 = "acs3"
 acsSpanToText ACS5 = "acs5"
 
+
 getACSData :: CF.Year -> ACS_Span -> CF.GeoCode a -> [Text] -> ClientM A.Value
 getACSData year span geoCode codes =
   let (forM, inM) = CF.geoCodeToQuery geoCode
@@ -106,6 +112,42 @@ getACSData year span geoCode codes =
                            (Just censusApiKey)
 
 
+getACSDataFrame'
+  :: forall fs gs
+   . (ColumnHeaders fs, ColumnHeaders gs)
+  => CF.RequestDictionary
+  -> CF.Year
+  -> ACS_Span
+  -> CF.GeoCode gs
+  -> X.ExceptT Text ClientM (F.FrameRec (gs V.++ fs))
+getACSDataFrame' dict year span geoCode = do
+  let keySet =
+        S.fromList (fmap pack $ F.columnHeaders (Proxy :: Proxy (F.Record fs)))
+      allColSet = S.union
+        keySet
+        (S.fromList $ fmap pack $ F.columnHeaders (Proxy :: Proxy (F.Record gs))
+        )
+  requests <-
+    maybe (X.throwError "Failed to find all requests") return
+      $ CF.getRequests dict keySet
+  let computeAndReduce =
+        CF.filterObject allColSet . CF.processRequests requests
+  queried <- X.lift
+    $ getACSData year span geoCode (S.toList $ CF.getFieldsToQuery requests)
+  let rows = case queried of
+        A.Array a -> fmap computeAndReduce $ Vec.tail a
+        _ ->
+          throwError "query returned something other than an array of objects"
+  -- NB: mapEither is a filter that passes only rows that have all required fields
+  X.lift
+    $     liftIO
+    $     FI.inCoreAoS
+    $     jsonArraysToRecordPipe (return computed)
+    P.>-> mapEither
+
+---
+
+{-
 type QueryFieldsC d gs fs = ( CF.QueryFields d fs
                             , ColumnHeaders (CF.QueryCodes d fs)
                             , gs F.⊆ ((CF.QueryCodes d fs) V.++ gs)
@@ -132,7 +174,7 @@ getACSDataFrame year span geoCode = do
     P.>-> mapEither
   let f r = (F.rcast @gs r) F.<+> (CF.makeQRec @CF.ACS @fs $ F.rcast r)
   return $ fmap f rawFrame
-
+-}
 
 jsonTextArrayToList :: A.Value -> [Text]
 jsonTextArrayToList x = x ^.. L.values . L._String
@@ -180,6 +222,7 @@ eitherRecordPrint eRec = case (F.rtraverse V.getCompose eRec) of
   Right r   -> liftIO $ print r
 
 
+{-
 getSAIPEData :: CF.Year -> CF.GeoCode a -> [Text] -> ClientM A.Value
 getSAIPEData year geo codes =
   let (forM, inM) = CF.geoCodeToQuery geo
@@ -206,4 +249,4 @@ getSAIPEDataFrame year geoCode = do
   let f r = (F.rcast @gs r) F.<+> (CF.makeQRec @CF.SAIPE @fs $ F.rcast r)
   return $ fmap f rawFrame
 
-
+-}

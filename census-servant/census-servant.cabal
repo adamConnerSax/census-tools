@@ -20,6 +20,7 @@ allow-newer: true
                      
 library
   exposed-modules: Census.API
+                 , Census.ComputedFields
                  , Census.Fields
   ghc-options:         -O0                 
   -- other-modules:
@@ -27,24 +28,30 @@ library
   build-depends:       base >=4.11.1.0
                      , aeson
                      , bytestring
+                     , containers
                      , text
+                     , foldl
                      , Frames
                      , network-uri
                      , servant
                      , lens
                      , lens-aeson
+                     , mtl
                      , vector
 --                     , Http
                      , http-api-data
-                     , pipes                     
+                     , pipes
+                     , profunctors
                      , safe-exceptions
                      , scientific
                      , servant-client-core >= 0.15
                      , servant-client
                      , servant-server
                      , servant
+                     , time
                      , transformers
                      , type-level-sets
+                     , unordered-containers
                      , vinyl
                      , warp
                      , http-api-data

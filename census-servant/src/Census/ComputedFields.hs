@@ -15,19 +15,34 @@
 {-# LANGUAGE TypeFamilies              #-}
 {-# LANGUAGE TypeOperators             #-}
 {-# LANGUAGE UndecidableInstances      #-}
-module Census.Fields where
+{-# LANGUAGE Rank2Types                #-}
+module Census.ComputedFields where
 
-import qualified Census.ComputedFields         as CF
-
+import qualified Control.Foldl                 as FL
+import qualified Data.Aeson                    as A
+import qualified Data.Aeson.Lens               as LA
+--import           Data.Aeson.Lens                ( (^?) )
+import           Control.Lens                   ( Getter
+                                                , (^?)
+                                                , re
+                                                , preview
+                                                , firstOf
+                                                )
 import qualified Data.Foldable                 as Fold
-import           Data.List                      ( nub
-                                                , concat
-                                                ) -- I know this is inefficient.  Short lists.
-import           Data.Proxy                     ( Proxy(..) )
+import qualified Data.HashMap.Lazy             as HML
+import qualified Data.List                     as L
+import           Data.Maybe                     ( catMaybes
+                                                , fromMaybe
+                                                )
 import qualified Data.Map                      as M
+import           Data.Ord                       ( Ordering )
+import qualified Data.Profunctor               as P
+import           Data.Proxy                     ( Proxy(..) )
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
-import qualified Data.Type.Set                 as TS
+import           Data.Time.Clock                ( UTCTime )
+import qualified Data.Set                      as S
+
 import qualified Data.Vinyl                    as V
 import qualified Data.Vinyl.Functor            as V
 import qualified Data.Vinyl.TypeLevel          as V
@@ -41,6 +56,94 @@ import           GHC.TypeLits                   ( Symbol
                                                 , KnownSymbol(..)
                                                 )
 
+-- | Wrap typed query results in a container that is agnostic to the type
+type ResultKey = Text
+
+--newtype KeyedResults = KeyedResults { unKeyedResults :: M.Map ResultKey A.Value } deriving (Show)
+
+data GetResult = Query Text | Compute (A.Object -> A.Value)
+
+data Request = Request { qdKey :: ResultKey, qdDependencies :: S.Set ResultKey, qdCompute :: GetResult }
+
+printRequest :: Request -> Text
+printRequest (Request k deps _) =
+  "key=" <> k <> "; deps=" <> (T.pack $ show $ S.toList deps)
+
+newtype RequestDictionary = RequestDictionary (M.Map ResultKey Request)
+
+newtype SortedRequests = SortedRequests [Request] -- sorted by dependency, x depends on y <=> y < x 
+
+compDependsOn :: Request -> Request -> Ordering
+compDependsOn ra@(Request ka da _) rb@(Request kb db _) =
+  let aDependsOnb = kb `S.member` da
+      bDependsOna = ka `S.member` db
+  in  case (aDependsOnb, bDependsOna) of
+        (False, False) -> EQ
+        (False, True ) -> LT
+        (True , False) -> GT
+        (True, True) ->
+          error
+            $  "cyclic dependencies between "
+            ++ (T.unpack $ printRequest ra)
+            ++ " and "
+            ++ (T.unpack $ printRequest rb)
+
+sortByDependency :: [Request] -> SortedRequests
+sortByDependency = SortedRequests . L.sortBy compDependsOn
+
+getRequests :: RequestDictionary -> S.Set ResultKey -> Maybe SortedRequests
+getRequests (RequestDictionary dict) resKeys =
+  fmap (sortByDependency . fmap snd . M.toList) $ go M.empty (S.toList resKeys)
+ where
+  go rsSoFar []       = Just rsSoFar -- we're done!
+  go rsSoFar (x : xs) = case M.lookup x rsSoFar of
+    Just _  -> go rsSoFar xs -- we already have it
+    Nothing -> case M.lookup x dict of
+      Just req@(Request _ deps _) ->
+        go (M.insert x req rsSoFar) (S.toList deps ++ xs) -- in the dictionary, now we need the deps
+      Nothing -> Nothing -- not in the dictionary.  
+
+-- | We add a helper for this case
+query :: Text -> ResultKey -> [Request]
+query queryText key =
+  let keyedValue :: Text -> A.Object -> A.Value
+      keyedValue t = \o -> fromMaybe A.Null (HML.lookup t o)
+  in  [ Request queryText S.empty                 (Query queryText)
+      , Request key (S.singleton queryText) (Compute $ keyedValue queryText)
+      ]
+
+ifQuery :: Request -> Maybe Text
+ifQuery (Request _ _ (Query t)) = Just t
+ifQuery (Request _ _ _        ) = Nothing
+
+getFieldsToQuery :: SortedRequests -> S.Set Text
+getFieldsToQuery (SortedRequests rs) = S.fromList . catMaybes $ fmap ifQuery rs
+
+data Pair a b = Pair !a !b
+missingDependencies :: SortedRequests -> [Text]
+missingDependencies (SortedRequests rs) = FL.fold
+  (FL.Fold check (Pair S.empty []) (\(Pair _ b) -> b))
+  rs
+ where
+  check (Pair have missing) (Request k deps _) = Pair
+    (S.insert k have)
+    (if deps `S.isSubsetOf` have then missing else k : missing)
+
+processRequestsF :: A.Object -> FL.Fold Request A.Object
+processRequestsF queried = FL.Fold doRequest queried id
+ where
+  doRequest :: A.Object -> Request -> A.Object
+  doRequest o (Request _ _ (Query   _)) = o
+  doRequest o (Request k _ (Compute f)) = HML.insert k (f o) o
+
+processRequests :: SortedRequests -> A.Object -> A.Object
+processRequests (SortedRequests rs) queried =
+  FL.fold (processRequestsF queried) rs
+
+filterObject :: S.Set Text -> A.Object -> A.Object
+filterObject keys = HML.filterWithKey (\k _ -> k `S.member` keys)
+
+{-
 -- state FIPS datatypes
 F.tableTypes "StateFIPSAndNames" "../conversion-data/states.csv"  -- declares StateName, StateFIPS, StateAbbreviation
 
@@ -50,6 +153,9 @@ F.declareColumn "CongressionalDistrict" ''Int -- = "countyFIPS" :-> Int
 type Year = Int
 F.declareColumn "YearF" ''Year
 
+data DataSet = ACS | SAIPE deriving (Show)
+
+-- Want constructors that take smarter types, like a state/county or state/congressional district or whatever
 data GeoCode a where
   AllStatesAndCounties :: GeoCode '[StateFIPS, CountyFIPS]
   AllStatesAndDistricts :: GeoCode '[StateFIPS, CongressionalDistrict]
@@ -60,17 +166,61 @@ geoCodeToQuery :: GeoCode a -> (Maybe Text, Maybe Text)
 geoCodeToQuery AllStatesAndCounties = (Just "county:*", Just "state:*")
 geoCodeToQuery AllStatesAndDistricts =
   (Just "congressional district:*", Just "state:*")
+{-
+data ACS_DataFieldCode a where
+  ACS_IntField :: T.Text -> ACS_DataFieldCode Int
+  ACS_DoubleField :: T.Text -> ACS_DataFieldCode Double
+  ACS_TextField :: T.Text -> ACS_DataFieldCode T.Text
+-}
 
-acsRequestDictionary =
-  M.fromList
-    . fmap (\r@(CF.Request k _ _) -> (k, r))
-    . concat
-    $ [CF.query "B01003_001E" "Population"]
+class ComputedField (b :: DataSet) (a :: (Symbol,Type)) where
+  type FieldNeeds b a :: [(Symbol, Type)] -- these will be like ("B17001_001E" :: KnownSymbol,Int)
+  makeField :: F.Record (FieldNeeds b a) -> V.Snd a
 
-F.declareColumn "Population" ''Int
+
+class QueryFields  (b :: DataSet) (as ::[(Symbol,Type)]) where
+  type QueryCodes b as :: [(Symbol, Type)]
+  makeQRec :: F.Record (QueryCodes b as) -> F.Record as
+
+queryCodes
+  :: forall b rs
+   . (QueryFields b rs, F.ColumnHeaders (QueryCodes b rs))
+  => [T.Text]
+queryCodes =
+  T.pack <$> F.columnHeaders (Proxy :: Proxy (F.Record (QueryCodes b rs)))
 
 
 {-
+We will repeat fields and the census endpoint will get tired of us.  So we need to query only unique fields.  Which, here, requires type-level nub.
+
+Should be in Type-List.  Got from <https://mail.haskell.org/pipermail/haskell-cafe/2016-February/123005.html> and
+more specifically, <https://gist.github.com/roelvandijk/f115c6b85a3961e1b689>
+-}
+type family Nub xs where
+  Nub '[] = '[]
+  Nub (x ': xs) = x ': Nub (Remove x xs)
+
+type family Remove x xs where
+  Remove x '[]       = '[]
+  Remove x (x ': ys) =      Remove x ys
+  Remove x (y ': ys) = y ': Remove x ys
+
+instance QueryFields b '[] where
+  type QueryCodes b '[] = '[]
+  makeQRec _ = V.RNil
+
+instance (V.KnownField r
+         , QueryFields b rs
+         , ComputedField b r
+         , (FieldNeeds b r) F.⊆ (QueryCodes b (r ': rs))
+         , (QueryCodes b rs) F.⊆ (QueryCodes b (r ': rs))
+         ) => QueryFields b (r ': rs) where
+  type QueryCodes b (r ': rs) = Nub ((FieldNeeds b r) V.++ (QueryCodes b rs)) -- don't duplicate fields.
+  makeQRec qs =
+    let newField = V.Field (makeField @b @r $ F.rcast qs)
+    in newField V.:& (makeQRec @b @rs $ F.rcast qs)
+
+F.declareColumn "Population" ''Int
 type B01003_001E = "B01003_001E" F.:-> Int
 instance ComputedField ACS Population where
   type FieldNeeds ACS Population = '[B01003_001E]
