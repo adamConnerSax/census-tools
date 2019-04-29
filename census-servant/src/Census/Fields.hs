@@ -100,16 +100,6 @@ acsRequestDictionary = CF.RequestDictionary $ M.fromList $ fmap
 acsQueryRequests :: [CF.Request]
 acsQueryRequests =
   concat $ fmap (\(censusV, key) -> CF.query censusV key) codes
-{-    $  [ ("B01003_001E" , "Population")
-       , ("B01001_001E" , "Total")
-       , ("B01001_002E" , "TotalMale")
-       , ("B01001A_001E", "TotalWhite")
-       , ("B01001A_002E", "TotalWhiteMale")
-       , ("B01001B_001E", "TotalBlack")
-       , ("B01001B_002E", "TotalBlackMale")
-       ]
-    ++ youngMaleCodes
--}
 
 acsComputedRequests :: [CF.Request]
 acsComputedRequests =
@@ -277,7 +267,6 @@ oldWhiteMalePctR = CF.Request "OldWhiteMalePct"
                               (S.fromList ["OldWhiteMale", "Total"])
                               (CF.Compute $ CF.ratio "OldWhiteMale" "Total")
 
-
 youngNonWhiteMaleR = CF.Request
   "YoungNonWhiteMale"
   (S.fromList ["YoungMale", "YoungWhiteMale"])
@@ -324,7 +313,6 @@ oldWhiteFemalePctR = CF.Request
   "OldWhiteFemalePct"
   (S.fromList ["OldWhiteFemale", "Total"])
   (CF.Compute $ CF.ratio "OldWhiteFemale" "Total")
-
 
 youngNonWhiteFemaleR = CF.Request
   "YoungNonWhiteFemale"
