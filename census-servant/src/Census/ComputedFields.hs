@@ -104,8 +104,6 @@ getRequests (RequestDictionary dict) resKeys =
       Nothing ->
         Left $ "Failed to find \"" <> x <> " in the request dictionary"  -- not in the dictionary.  
 
-
-
 keyedValue :: Text -> A.Object -> Either Text A.Value
 keyedValue t = \o ->
   maybe
@@ -165,7 +163,7 @@ objectToArray keys o = fmap Vec.fromList $ traverse
   keys
 
 -- computational helpers
-
+-- I need to simplify this.
 as :: Read a => A.Value -> Maybe a
 as (A.String x) = readMaybe (T.unpack x)
 as _            = Nothing
