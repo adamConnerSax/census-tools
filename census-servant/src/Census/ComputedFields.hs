@@ -31,6 +31,7 @@ import           Control.Lens                   ( Getter
 import qualified Data.Foldable                 as Fold
 import qualified Data.HashMap.Lazy             as HML
 import qualified Data.List                     as L
+import qualified Data.Graph                    as G
 import           Data.Maybe                     ( catMaybes
                                                 , fromMaybe
                                                 )
@@ -40,12 +41,14 @@ import qualified Data.Profunctor               as P
 import           Data.Proxy                     ( Proxy(..) )
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
+import           Text.Read                      ( readMaybe )
 import           Data.Time.Clock                ( UTCTime )
 import qualified Data.Set                      as S
 
 import qualified Data.Vinyl                    as V
 import qualified Data.Vinyl.Functor            as V
 import qualified Data.Vinyl.TypeLevel          as V
+import qualified Data.Vector                   as Vec
 import qualified Frames                        as F
 import qualified Frames                         ( (:->)
                                                 , (&:)
@@ -61,7 +64,7 @@ type ResultKey = Text
 
 --newtype KeyedResults = KeyedResults { unKeyedResults :: M.Map ResultKey A.Value } deriving (Show)
 
-data GetResult = Query Text | Compute (A.Object -> A.Value)
+data GetResult = Query Text | Compute (A.Object -> Either Text A.Value)
 
 data Request = Request { qdKey :: ResultKey, qdDependencies :: S.Set ResultKey, qdCompute :: GetResult }
 
@@ -73,44 +76,53 @@ newtype RequestDictionary = RequestDictionary (M.Map ResultKey Request)
 
 newtype SortedRequests = SortedRequests [Request] -- sorted by dependency, x depends on y <=> y < x 
 
-compDependsOn :: Request -> Request -> Ordering
-compDependsOn ra@(Request ka da _) rb@(Request kb db _) =
-  let aDependsOnb = kb `S.member` da
-      bDependsOna = ka `S.member` db
-  in  case (aDependsOnb, bDependsOna) of
-        (False, False) -> EQ
-        (False, True ) -> LT
-        (True , False) -> GT
-        (True, True) ->
-          error
-            $  "cyclic dependencies between "
-            ++ (T.unpack $ printRequest ra)
-            ++ " and "
-            ++ (T.unpack $ printRequest rb)
+printSortedRequests (SortedRequests rs) = T.pack $ show $ fmap printRequest rs
 
+{-
+The ordering here is partial so we need a topological sort.  Requests are vertices which have an edge to anything they depend on.
+Topological sorting produces an ordering of vertices such that if v' is reachable from v, it appears later.
+In our case, that means if v depends on v', v will appear before v'.  We need the reverse of this.
+-}
 sortByDependency :: [Request] -> SortedRequests
-sortByDependency = SortedRequests . L.sortBy compDependsOn
+sortByDependency rs =
+  let (graph, retrieveNode) = G.graphFromEdges'
+        $ fmap (\r@(Request k ds _) -> (r, k, S.toList ds)) rs
+      topSorted = fmap ((\(r, _, _) -> r) . retrieveNode) $ G.topSort graph
+  in  SortedRequests (reverse topSorted)
 
-getRequests :: RequestDictionary -> S.Set ResultKey -> Maybe SortedRequests
+getRequests
+  :: RequestDictionary -> S.Set ResultKey -> Either Text SortedRequests
 getRequests (RequestDictionary dict) resKeys =
   fmap (sortByDependency . fmap snd . M.toList) $ go M.empty (S.toList resKeys)
  where
-  go rsSoFar []       = Just rsSoFar -- we're done!
+  go rsSoFar []       = Right rsSoFar -- we're done!
   go rsSoFar (x : xs) = case M.lookup x rsSoFar of
     Just _  -> go rsSoFar xs -- we already have it
     Nothing -> case M.lookup x dict of
       Just req@(Request _ deps _) ->
         go (M.insert x req rsSoFar) (S.toList deps ++ xs) -- in the dictionary, now we need the deps
-      Nothing -> Nothing -- not in the dictionary.  
+      Nothing ->
+        Left $ "Failed to find \"" <> x <> " in the request dictionary"  -- not in the dictionary.  
 
--- | We add a helper for this case
+
+
+keyedValue :: Text -> A.Object -> Either Text A.Value
+keyedValue t = \o ->
+  maybe
+      (Left $ "Lookup failed for key=" <> t <> " in o=" <> (T.pack $ show o))
+      Right
+    $ HML.lookup t o
+
+-- | Helper for the query case
 query :: Text -> ResultKey -> [Request]
 query queryText key =
-  let keyedValue :: Text -> A.Object -> A.Value
-      keyedValue t = \o -> fromMaybe A.Null (HML.lookup t o)
-  in  [ Request queryText S.empty                 (Query queryText)
-      , Request key (S.singleton queryText) (Compute $ keyedValue queryText)
-      ]
+  [ Request queryText S.empty                 (Query queryText)
+  , Request key       (S.singleton queryText) (Compute $ keyedValue queryText)
+  ]
+-- | Helper for things in the query but not queried for, like geography
+inQuery :: Text -> Text -> (Text, Request)
+inQuery returnedHeader key =
+  (key, Request key S.empty (Compute $ keyedValue returnedHeader))
 
 ifQuery :: Request -> Maybe Text
 ifQuery (Request _ _ (Query t)) = Just t
@@ -129,19 +141,101 @@ missingDependencies (SortedRequests rs) = FL.fold
     (S.insert k have)
     (if deps `S.isSubsetOf` have then missing else k : missing)
 
-processRequestsF :: A.Object -> FL.Fold Request A.Object
-processRequestsF queried = FL.Fold doRequest queried id
+processRequestsF :: A.Object -> FL.Fold Request (Either Text A.Object)
+processRequestsF queried = FL.Fold doRequest (Right queried) id
  where
-  doRequest :: A.Object -> Request -> A.Object
-  doRequest o (Request _ _ (Query   _)) = o
-  doRequest o (Request k _ (Compute f)) = HML.insert k (f o) o
+  doRequest :: Either Text A.Object -> Request -> Either Text A.Object
+  doRequest eto (Request _ _ (Query _)) = eto
+  doRequest (Right o) (Request k _ (Compute f)) =
+    fmap (\v -> HML.insert k v o) $ f o
+  doRequest (Left t) _ = Left t
 
-processRequests :: SortedRequests -> A.Object -> A.Object
+processRequests :: SortedRequests -> A.Object -> Either Text A.Object
 processRequests (SortedRequests rs) queried =
   FL.fold (processRequestsF queried) rs
 
-filterObject :: S.Set Text -> A.Object -> A.Object
-filterObject keys = HML.filterWithKey (\k _ -> k `S.member` keys)
+objectToArray :: [Text] -> A.Object -> Either Text A.Array
+objectToArray keys o = fmap Vec.fromList $ traverse
+  (\k ->
+    maybe
+        (Left $ "Lookup failed for key=" <> k <> " in " <> (T.pack $ show o))
+        Right
+      $ HML.lookup k o
+  )
+  keys
+
+-- computational helpers
+
+as :: Read a => A.Value -> Maybe a
+as (A.String x) = readMaybe (T.unpack x)
+as _            = Nothing
+
+addAll
+  :: forall a
+   . (Show a, Read a, Num a)
+  => S.Set Text
+  -> A.Object
+  -> Either Text A.Value
+addAll keys o =
+  let filtered   = HML.filterWithKey (\k _ -> k `S.member` keys) o
+      asNumbersM = traverse (as @a) filtered
+      addedM     = fmap (Fold.foldl' (+) (0 :: a)) asNumbersM
+  in  maybe
+        (  Left
+        $  "addAll failed with keys="
+        <> (T.pack $ show keys)
+        <> " and o="
+        <> (T.pack $ show o)
+        )
+        (Right . A.String . T.pack . show)
+        addedM
+
+difference
+  :: forall a
+   . (Read a, Show a, Num a)
+  => Text
+  -> Text
+  -> A.Object
+  -> Either Text A.Value
+difference a b o =
+  let aM    = HML.lookup a o >>= as @a
+      bM    = HML.lookup b o >>= as @a
+      diffM = do
+        a <- aM
+        b <- bM
+        return (a - b)
+  in  maybe
+        (  Left
+        $  "difference failed with a="
+        <> (T.pack $ show a)
+        <> " and b="
+        <> (T.pack $ show b)
+        <> " and o="
+        <> (T.pack $ show o)
+        )
+        (Right . A.String . T.pack . show)
+        diffM
+
+
+ratio :: Text -> Text -> A.Object -> Either Text A.Value
+ratio a b o =
+  let aM     = HML.lookup a o >>= as @Double
+      bM     = HML.lookup b o >>= as @Double
+      ratioM = do
+        a <- aM
+        b <- bM
+        return (a / b)
+  in  maybe
+        (  Left
+        $  "ratio failed with a="
+        <> (T.pack $ show a)
+        <> " and b="
+        <> (T.pack $ show b)
+        <> " and o="
+        <> (T.pack $ show o)
+        )
+        (Right . A.String . T.pack . show)
+        ratioM
 
 {-
 -- state FIPS datatypes

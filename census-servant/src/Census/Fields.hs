@@ -15,19 +15,23 @@
 {-# LANGUAGE TypeFamilies              #-}
 {-# LANGUAGE TypeOperators             #-}
 {-# LANGUAGE UndecidableInstances      #-}
+{-# LANGUAGE Rank2Types                #-}
 module Census.Fields where
 
 import qualified Census.ComputedFields         as CF
 
+import qualified Data.Aeson                    as A
 import qualified Data.Foldable                 as Fold
 import           Data.List                      ( nub
                                                 , concat
                                                 ) -- I know this is inefficient.  Short lists.
 import           Data.Proxy                     ( Proxy(..) )
 import qualified Data.Map                      as M
+import qualified Data.HashMap.Lazy             as HML
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
-import qualified Data.Type.Set                 as TS
+
+import qualified Data.Set                      as S
 import qualified Data.Vinyl                    as V
 import qualified Data.Vinyl.Functor            as V
 import qualified Data.Vinyl.TypeLevel          as V
@@ -50,6 +54,23 @@ F.declareColumn "CongressionalDistrict" ''Int -- = "countyFIPS" :-> Int
 type Year = Int
 F.declareColumn "YearF" ''Year
 
+F.declareColumn "Population" ''Int
+F.declareColumn "YoungMale" ''Int
+F.declareColumn "YoungWhiteMalePct" ''Double
+F.declareColumn "OldWhiteMalePct" ''Double
+F.declareColumn "YoungWhiteFemalePct" ''Double
+F.declareColumn "OldWhiteFemalePct" ''Double
+F.declareColumn "YoungNonWhiteMalePct" ''Double
+F.declareColumn "OldNonWhiteMalePct" ''Double
+F.declareColumn "YoungNonWhiteFemalePct" ''Double
+F.declareColumn "OldNonWhiteFemalePct" ''Double
+
+
+F.declareColumn "YoungMalePctPop" ''Double
+F.declareColumn "YoungMalePctTot" ''Double
+
+
+
 data GeoCode a where
   AllStatesAndCounties :: GeoCode '[StateFIPS, CountyFIPS]
   AllStatesAndDistricts :: GeoCode '[StateFIPS, CongressionalDistrict]
@@ -61,13 +82,280 @@ geoCodeToQuery AllStatesAndCounties = (Just "county:*", Just "state:*")
 geoCodeToQuery AllStatesAndDistricts =
   (Just "congressional district:*", Just "state:*")
 
-acsRequestDictionary =
-  M.fromList
-    . fmap (\r@(CF.Request k _ _) -> (k, r))
-    . concat
-    $ [CF.query "B01003_001E" "Population"]
+addGeoCodeRequests :: GeoCode a -> CF.RequestDictionary -> CF.RequestDictionary
+addGeoCodeRequests x (CF.RequestDictionary dict) =
+  CF.RequestDictionary $ M.union dict $ case x of
+    AllStatesAndCounties -> M.fromList
+      [CF.inQuery "county" "CountyFIPS", CF.inQuery "state" "StateFIPS"]
+    AllStatesAndDistricts -> M.fromList
+      [ CF.inQuery "congressional district" "CongressionalDistrict"
+      , CF.inQuery "state" "StateFIPS"
+      ]
 
-F.declareColumn "Population" ''Int
+acsRequestDictionary = CF.RequestDictionary $ M.fromList $ fmap
+  (\r@(CF.Request k _ _) -> (k, r))
+  (acsQueryRequests ++ acsComputedRequests)
+
+
+acsQueryRequests :: [CF.Request]
+acsQueryRequests =
+  concat $ fmap (\(censusV, key) -> CF.query censusV key) codes
+{-    $  [ ("B01003_001E" , "Population")
+       , ("B01001_001E" , "Total")
+       , ("B01001_002E" , "TotalMale")
+       , ("B01001A_001E", "TotalWhite")
+       , ("B01001A_002E", "TotalWhiteMale")
+       , ("B01001B_001E", "TotalBlack")
+       , ("B01001B_002E", "TotalBlackMale")
+       ]
+    ++ youngMaleCodes
+-}
+
+acsComputedRequests :: [CF.Request]
+acsComputedRequests =
+  [ youngMaleR
+  , oldMaleR
+  , youngMalePctPopR
+  , youngMalePctTotR
+  , youngWhiteMaleR
+  , youngWhiteMalePctR
+  , oldWhiteMaleR
+  , oldWhiteMalePctR
+  , youngFemaleR
+  , oldFemaleR
+  , oldFemaleR
+  , youngWhiteFemaleR
+  , youngWhiteFemalePctR
+  , oldWhiteFemaleR
+  , oldWhiteFemalePctR
+  , youngNonWhiteMaleR
+  , youngNonWhiteMalePctR
+  , oldNonWhiteMaleR
+  , oldNonWhiteMalePctR
+  , youngNonWhiteFemaleR
+  , youngNonWhiteFemalePctR
+  , oldNonWhiteFemaleR
+  , oldNonWhiteFemalePctR
+  ]
+
+youngMaleCodes :: [(Text, Text)]
+youngMaleCodes =
+  [ ("B01001_003E", "MaleUnder5")
+  , ("B01001_004E", "Male5To9")
+  , ("B01001_005E", "Male10To14")
+  , ("B01001_006E", "Male15To17")
+  , ("B01001_007E", "Male18To19")
+  , ("B01001_008E", "Male20")
+  , ("B01001_009E", "Male21")
+  , ("B01001_010E", "Male22To24")
+  , ("B01001_011E", "Male25To29")
+  , ("B01001_012E", "Male30To34")
+  , ("B01001_013E", "Male35To39")
+  , ("B01001_014E", "Male40To44")
+  ]
+
+youngFemaleCodes :: [(Text, Text)]
+youngFemaleCodes =
+  [ ("B01001_027E", "FemaleUnder5")
+  , ("B01001_028E", "Female5To9")
+  , ("B01001_029E", "Female10To14")
+  , ("B01001_030E", "Female15To17")
+  , ("B01001_031E", "Female18To19")
+  , ("B01001_032E", "Female20")
+  , ("B01001_033E", "Female21")
+  , ("B01001_034E", "Female22To24")
+  , ("B01001_035E", "Female25To29")
+  , ("B01001_036E", "Female30To34")
+  , ("B01001_037E", "Female35To39")
+  , ("B01001_038E", "Female40To44")
+  ]
+
+youngWhiteMaleCodes :: [(Text, Text)]
+youngWhiteMaleCodes =
+  [ ("B01001A_003E", "WhiteMaleUnder5")
+  , ("B01001A_004E", "WhiteMale5To9")
+  , ("B01001A_005E", "WhiteMale10To14")
+  , ("B01001A_006E", "WhiteMale15To17")
+  , ("B01001A_007E", "WhiteMale18To19")
+  , ("B01001A_008E", "WhiteMale20To24")
+  , ("B01001A_009E", "WhiteMale25To29")
+  , ("B01001A_010E", "WhiteMale30To34")
+  , ("B01001A_011E", "WhiteMale35To44")
+  ]
+
+youngWhiteFemaleCodes :: [(Text, Text)]
+youngWhiteFemaleCodes =
+  [ ("B01001A_018E", "WhiteFemaleUnder5")
+  , ("B01001A_019E", "WhiteFemale5To9")
+  , ("B01001A_020E", "WhiteFemale10To14")
+  , ("B01001A_021E", "WhiteFemale15To17")
+  , ("B01001A_022E", "WhiteFemale18To19")
+  , ("B01001A_023E", "WhiteFemale20To24")
+  , ("B01001A_024E", "WhiteFemale25To29")
+  , ("B01001A_025E", "WhiteFemale30To34")
+  , ("B01001A_026E", "WhiteFemale35To44")
+  ]
+
+youngBlackMaleCodes :: [(Text, Text)]
+youngBlackMaleCodes =
+  [ ("B01001B_003E", "BlackMaleUnder5")
+  , ("B01001B_004E", "BlackMale5To9")
+  , ("B01001B_005E", "BlackMale10To14")
+  , ("B01001B_006E", "BlackMale15To17")
+  , ("B01001B_007E", "BlackMale18To19")
+  , ("B01001B_008E", "BlackMale20To24")
+  , ("B01001B_009E", "BlackMale25To29")
+  , ("B01001B_010E", "BlackMale30To34")
+  , ("B01001B_011E", "BlackMale35To44")
+  ]
+
+youngBlackFemaleCodes :: [(Text, Text)]
+youngBlackFemaleCodes =
+  [ ("B01001B_018E", "BlackFemaleUnder5")
+  , ("B01001B_019E", "BlackFemale5To9")
+  , ("B01001B_020E", "BlackFemale10To14")
+  , ("B01001B_021E", "BlackFemale15To17")
+  , ("B01001B_022E", "BlackFemale18To19")
+  , ("B01001B_023E", "BlackFemale20To24")
+  , ("B01001B_024E", "BlackFemale25To29")
+  , ("B01001B_025E", "BlackFemale30To34")
+  , ("B01001B_026E", "BlackFemale35To44")
+  ]
+
+
+codes :: [(Text, Text)]
+codes =
+  [ ("B01003_001E", "Population")
+    , ("B01001_001E", "Total")
+    , ("B01001_002E", "TotalMale")
+    ]
+    ++ youngMaleCodes
+    ++ [("B01001_026E", "TotalFemale")]
+    ++ youngFemaleCodes
+    ++ [("B01001A_001E", "TotalWhite"), ("B01001A_002E", "TotalWhiteMale")]
+    ++ youngWhiteMaleCodes
+    ++ [("B01001A_017E", "TotalWhiteFemale")]
+    ++ youngWhiteFemaleCodes
+    ++ [("B01001B_001E", "TotalBlack"), ("B01001B_002E", "TotalBlackMale")]
+    ++ youngBlackMaleCodes
+    ++ [("B01001B_017E", "TotalBlackFemale")]
+    ++ youngBlackFemaleCodes
+
+youngMaleKeys :: S.Set Text
+youngMaleKeys = S.fromList $ fmap snd youngMaleCodes
+
+youngWhiteMaleKeys :: S.Set Text
+youngWhiteMaleKeys = S.fromList $ fmap snd youngWhiteMaleCodes
+
+youngFemaleKeys :: S.Set Text
+youngFemaleKeys = S.fromList $ fmap snd youngFemaleCodes
+
+youngWhiteFemaleKeys :: S.Set Text
+youngWhiteFemaleKeys = S.fromList $ fmap snd youngWhiteFemaleCodes
+
+youngMaleR =
+  CF.Request "YoungMale" youngMaleKeys (CF.Compute $ CF.addAll youngMaleKeys)
+
+oldMaleR = CF.Request "OldMale"
+                      (S.fromList ["TotalMale", "YoungMale"])
+                      (CF.Compute $ CF.difference "TotalMale" "YoungMale")
+
+youngWhiteMaleR = CF.Request "YoungWhiteMale"
+                             youngWhiteMaleKeys
+                             (CF.Compute $ CF.addAll youngWhiteMaleKeys)
+youngWhiteMalePctR = CF.Request
+  "YoungWhiteMalePct"
+  (S.fromList ["YoungWhiteMale", "Total"])
+  (CF.Compute $ CF.ratio "YoungWhiteMale" "Total")
+
+oldWhiteMaleR = CF.Request
+  "OldWhiteMale"
+  (S.fromList ["TotalWhiteMale", "YoungWhiteMale"])
+  (CF.Compute $ CF.difference "TotalWhiteMale" "YoungWhiteMale")
+
+oldWhiteMalePctR = CF.Request "OldWhiteMalePct"
+                              (S.fromList ["OldWhiteMale", "Total"])
+                              (CF.Compute $ CF.ratio "OldWhiteMale" "Total")
+
+
+youngNonWhiteMaleR = CF.Request
+  "YoungNonWhiteMale"
+  (S.fromList ["YoungMale", "YoungWhiteMale"])
+  (CF.Compute $ CF.difference "YoungMale" "YoungWhiteMale")
+youngNonWhiteMalePctR = CF.Request
+  "YoungNonWhiteMalePct"
+  (S.fromList ["YoungNonWhiteMale", "Total"])
+  (CF.Compute $ CF.ratio "YoungNonWhiteMale" "Total")
+
+oldNonWhiteMaleR = CF.Request
+  "OldNonWhiteMale"
+  (S.fromList ["OldMale", "OldWhiteMale"])
+  (CF.Compute $ CF.difference "OldMale" "OldWhiteMale")
+oldNonWhiteMalePctR = CF.Request
+  "OldNonWhiteMalePct"
+  (S.fromList ["OldNonWhiteMale", "Total"])
+  (CF.Compute $ CF.ratio "OldNonWhiteMale" "Total")
+
+
+youngFemaleR = CF.Request "YoungFemale"
+                          youngFemaleKeys
+                          (CF.Compute $ CF.addAll youngFemaleKeys)
+
+oldFemaleR = CF.Request
+  "OldFemale"
+  (S.fromList ["TotalFemale", "YoungFemale"])
+  (CF.Compute $ CF.difference "TotalFemale" "YoungFemale")
+
+youngWhiteFemaleR = CF.Request "YoungWhiteFemale"
+                               youngWhiteFemaleKeys
+                               (CF.Compute $ CF.addAll youngWhiteFemaleKeys)
+
+youngWhiteFemalePctR = CF.Request
+  "YoungWhiteFemalePct"
+  (S.fromList ["YoungWhiteFemale", "Total"])
+  (CF.Compute $ CF.ratio "YoungWhiteFemale" "Total")
+
+oldWhiteFemaleR = CF.Request
+  "OldWhiteFemale"
+  (S.fromList ["TotalWhiteFemale", "YoungWhiteFemale"])
+  (CF.Compute $ CF.difference "TotalWhiteFemale" "YoungWhiteFemale")
+
+oldWhiteFemalePctR = CF.Request
+  "OldWhiteFemalePct"
+  (S.fromList ["OldWhiteFemale", "Total"])
+  (CF.Compute $ CF.ratio "OldWhiteFemale" "Total")
+
+
+youngNonWhiteFemaleR = CF.Request
+  "YoungNonWhiteFemale"
+  (S.fromList ["YoungFemale", "YoungWhiteFemale"])
+  (CF.Compute $ CF.difference "YoungFemale" "YoungWhiteFemale")
+youngNonWhiteFemalePctR = CF.Request
+  "YoungNonWhiteFemalePct"
+  (S.fromList ["YoungNonWhiteFemale", "Total"])
+  (CF.Compute $ CF.ratio "YoungNonWhiteFemale" "Total")
+
+oldNonWhiteFemaleR = CF.Request
+  "OldNonWhiteFemale"
+  (S.fromList ["OldFemale", "OldWhiteFemale"])
+  (CF.Compute $ CF.difference "OldFemale" "OldWhiteFemale")
+oldNonWhiteFemalePctR = CF.Request
+  "OldNonWhiteFemalePct"
+  (S.fromList ["OldNonWhiteFemale", "Total"])
+  (CF.Compute $ CF.ratio "OldNonWhiteFemale" "Total")
+
+
+youngMalePctPopR = CF.Request
+  "YoungMalePctPop"
+  (S.fromList ["YoungMale", "Population"])
+  (CF.Compute $ CF.ratio "YoungMale" "Population")
+
+youngMalePctTotR = CF.Request "YoungMalePctTot"
+                              (S.fromList ["YoungMale", "Total"])
+                              (CF.Compute $ CF.ratio "YoungMale" "Total")
+
+
+
 
 
 {-

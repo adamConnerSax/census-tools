@@ -40,9 +40,11 @@ import           Control.Monad.IO.Class         ( MonadIO
                                                 )
 import qualified Control.Monad.Except          as X
 import qualified Data.Aeson                    as A
+import qualified Data.Aeson.Types              as A
 import qualified Data.Aeson.Lens               as L
 import           Data.ByteString.Lazy           ( fromStrict )
 import qualified Data.Foldable                 as F
+import qualified Data.HashMap.Lazy             as HML
 import qualified Data.List                     as List
 import           Data.Maybe                     ( fromMaybe )
 import           Data.Monoid                    ( (<>) )
@@ -112,69 +114,65 @@ getACSData year span geoCode codes =
                            (Just censusApiKey)
 
 
+mergeEithers (Right x) = x
+mergeEithers (Left  y) = Left y
+
 getACSDataFrame'
   :: forall fs gs
-   . (ColumnHeaders fs, ColumnHeaders gs)
+   . ( ColumnHeaders fs
+     , ColumnHeaders gs
+     , RecVec (gs ++ fs)
+     , ReadRec (gs ++ fs)
+     , RMap (gs ++ fs)
+     , ReifyConstraint Show ElField (gs ++ fs)
+     , RecordToList (gs ++ fs)
+     )
   => CF.RequestDictionary
   -> CF.Year
   -> ACS_Span
   -> CF.GeoCode gs
   -> X.ExceptT Text ClientM (F.FrameRec (gs V.++ fs))
 getACSDataFrame' dict year span geoCode = do
-  let keySet =
-        S.fromList (fmap pack $ F.columnHeaders (Proxy :: Proxy (F.Record fs)))
-      allColSet = S.union
-        keySet
-        (S.fromList $ fmap pack $ F.columnHeaders (Proxy :: Proxy (F.Record gs))
-        )
-  requests <-
-    maybe (X.throwError "Failed to find all requests") return
-      $ CF.getRequests dict keySet
-  let computeAndReduce =
-        CF.filterObject allColSet . CF.processRequests requests
+  let gColHeaders  = fmap pack $ F.columnHeaders (Proxy :: Proxy (F.Record gs))
+      fColHeaders  = fmap pack $ F.columnHeaders (Proxy :: Proxy (F.Record fs))
+      keySet       = S.fromList (fColHeaders ++ gColHeaders)
+      dictWithGeos = CF.addGeoCodeRequests geoCode dict -- geoCode cols need to be added
+  requests <- either X.throwError return $ CF.getRequests dictWithGeos keySet
+--  X.lift $ liftIO $ putStrLn $ unpack $ CF.printSortedRequests requests
+  let computeAndReduce :: Vec.Vector Text -> A.Array -> Either Text A.Array
+      computeAndReduce keys =
+        mergeEithers
+          . fmap (CF.objectToArray (gColHeaders ++ fColHeaders))
+          . CF.processRequests requests
+          . HML.fromList
+          . Vec.toList
+          . Vec.zip keys
   queried <- X.lift
     $ getACSData year span geoCode (S.toList $ CF.getFieldsToQuery requests)
-  let rows = case queried of
-        A.Array a -> fmap computeAndReduce $ Vec.tail a
-        _ ->
-          throwError "query returned something other than an array of objects"
-  -- NB: mapEither is a filter that passes only rows that have all required fields
+  let headersM :: Maybe (Vec.Vector Text) = join
+        $ traverse (traverse (^? L._String)) (queried ^? L.nth 0 . L._Array)
+  headers <- maybe (throwError "No rows or no headers") return headersM
+  --X.lift . liftIO $ putStrLn $ show queried
+  let rowsValE =
+        fmap (A.Array . Vec.fromList)
+          $ traverse (fmap A.Array . computeAndReduce headers)
+          $ tail (queried ^.. L.values . L._Array) -- tail here to get rid of header row
+  rowsVal <- either throwError return rowsValE
   X.lift
     $     liftIO
     $     FI.inCoreAoS
-    $     jsonArraysToRecordPipe (return computed)
+    $     jsonArraysToRecordPipe (return rowsVal)
     P.>-> mapEither
 
----
 
-{-
-type QueryFieldsC d gs fs = ( CF.QueryFields d fs
-                            , ColumnHeaders (CF.QueryCodes d fs)
-                            , gs F.⊆ ((CF.QueryCodes d fs) V.++ gs)
-                            , (CF.QueryCodes d fs) F.⊆ ((CF.QueryCodes d fs) V.++ gs)
-                            , V.RecordToList ((CF.QueryCodes d fs) V.++ gs)
-                            , V.ReifyConstraint Show V.ElField ((CF.QueryCodes d fs) V.++ gs)
-                            , RMap ((CF.QueryCodes d fs) V.++ gs)
-                            , FI.RecVec ((CF.QueryCodes d fs) V.++ gs)
-                            , F.ReadRec ((CF.QueryCodes d fs) V.++ gs))
+type MyServantClientM = X.ExceptT Text ClientM
+runX :: ClientEnv -> MyServantClientM a -> IO (Either Text a)
+runX env a =
+  let handleResult a = case a of
+        Left  ce -> Left . pack $ show ce
+        Right x  -> x
+  in  fmap handleResult $ flip runClientM env $ X.runExceptT a
 
-getACSDataFrame
-  :: forall fs gs
-   . QueryFieldsC CF.ACS gs fs
-  => CF.Year
-  -> ACS_Span
-  -> CF.GeoCode gs
-  -> ClientM (F.FrameRec (gs V.++ fs))
-getACSDataFrame year span geoCode = do
-  asAeson <- getACSData year span geoCode (CF.queryCodes @CF.ACS @fs)
-  rawFrame :: F.FrameRec ((CF.QueryCodes CF.ACS fs) V.++ gs) <-
-    liftIO
-    $     FI.inCoreAoS
-    $     jsonArraysToRecordPipe (return asAeson)
-    P.>-> mapEither
-  let f r = (F.rcast @gs r) F.<+> (CF.makeQRec @CF.ACS @fs $ F.rcast r)
-  return $ fmap f rawFrame
--}
 
 jsonTextArrayToList :: A.Value -> [Text]
 jsonTextArrayToList x = x ^.. L.values . L._String
@@ -184,7 +182,8 @@ jsonArraysOfTextToPipe
 jsonArraysOfTextToPipe mv = do
   v <- P.lift mv
 --  liftIO $ putStrLn $ show v
-  let vs = v ^.. L.values -- get rid of header row
+  let vs = v ^.. L.values
+  P.yield "" -- pipeTableEither eats a row, presuming they are headers
   forM_ vs $ \v -> do
     let csv = intercalate "," $ jsonTextArrayToList v
 --    liftIO $ putStr $ show csv ++ ": "
@@ -220,6 +219,37 @@ eitherRecordPrint
 eitherRecordPrint eRec = case (F.rtraverse V.getCompose eRec) of
   Left  err -> liftIO $ putStrLn $ "Error: " ++ (unpack err)
   Right r   -> liftIO $ print r
+
+
+
+{-
+type QueryFieldsC d gs fs = ( CF.QueryFields d fs
+                            , ColumnHeaders (CF.QueryCodes d fs)
+                            , gs F.⊆ ((CF.QueryCodes d fs) V.++ gs)
+                            , (CF.QueryCodes d fs) F.⊆ ((CF.QueryCodes d fs) V.++ gs)
+                            , V.RecordToList ((CF.QueryCodes d fs) V.++ gs)
+                            , V.ReifyConstraint Show V.ElField ((CF.QueryCodes d fs) V.++ gs)
+                            , RMap ((CF.QueryCodes d fs) V.++ gs)
+                            , FI.RecVec ((CF.QueryCodes d fs) V.++ gs)
+                            , F.ReadRec ((CF.QueryCodes d fs) V.++ gs))
+
+getACSDataFrame
+  :: forall fs gs
+   . QueryFieldsC CF.ACS gs fs
+  => CF.Year
+  -> ACS_Span
+  -> CF.GeoCode gs
+  -> ClientM (F.FrameRec (gs V.++ fs))
+getACSDataFrame year span geoCode = do
+  asAeson <- getACSData year span geoCode (CF.queryCodes @CF.ACS @fs)
+  rawFrame :: F.FrameRec ((CF.QueryCodes CF.ACS fs) V.++ gs) <-
+    liftIO
+    $     FI.inCoreAoS
+    $     jsonArraysToRecordPipe (return asAeson)
+    P.>-> mapEither
+  let f r = (F.rcast @gs r) F.<+> (CF.makeQRec @CF.ACS @fs $ F.rcast r)
+  return $ fmap f rawFrame
+-}
 
 
 {-
