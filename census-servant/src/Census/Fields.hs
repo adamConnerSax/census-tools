@@ -243,104 +243,35 @@ youngFemaleKeys = S.fromList $ fmap snd youngFemaleCodes
 youngWhiteFemaleKeys :: S.Set Text
 youngWhiteFemaleKeys = S.fromList $ fmap snd youngWhiteFemaleCodes
 
-youngMaleR =
-  CF.Request "YoungMale" youngMaleKeys (CF.Compute $ CF.addAll youngMaleKeys)
+youngMaleR = CF.addAll "YoungMale" youngMaleKeys
+oldMaleR = CF.diff "OldMale" "TotalMale" "YoungMale"
+youngWhiteMaleR = CF.addAll "YoungWhiteMale" youngWhiteMaleKeys
+youngWhiteMalePctR = CF.ratio "YoungWhiteMalePct" "YoungWhiteMale" "Total"
+oldWhiteMaleR = CF.diff "OldWhiteMale" "TotalWhiteMale" "YoungWhiteMale"
+oldWhiteMalePctR = CF.ratio "OldWhiteMalePct" "OldWhiteMale" "Total"
+youngNonWhiteMaleR = CF.diff "YoungNonWhiteMale" "YoungMale" "YoungWhiteMale"
+youngNonWhiteMalePctR =
+  CF.ratio "YoungNonWhiteMalePct" "YoungNonWhiteMale" "Total"
+oldNonWhiteMaleR = CF.diff "OldNonWhiteMale" "OldMale" "OldWhiteMale"
+oldNonWhiteMalePctR = CF.ratio "OldNonWhiteMalePct" "OldNonWhiteMale" "Total"
+youngFemaleR = CF.addAll "YoungFemale" youngFemaleKeys
+oldFemaleR = CF.diff "OldFemale" "TotalFemale" "YoungFemale"
+youngWhiteFemaleR = CF.addAll "YoungWhiteFemale" youngWhiteFemaleKeys
+youngWhiteFemalePctR =
+  CF.ratio "YoungWhiteFemalePct" "YoungWhiteFemale" "Total"
+oldWhiteFemaleR =
+  CF.diff "OldWhiteFemale" "TotalWhiteFemale" "YoungWhiteFemale"
+oldWhiteFemalePctR = CF.ratio "OldWhiteFemalePct" "OldWhiteFemale" "Total"
+youngNonWhiteFemaleR =
+  CF.diff "YoungNonWhiteFemale" "YoungFemale" "YoungWhiteFemale"
+youngNonWhiteFemalePctR =
+  CF.ratio "YoungNonWhiteFemalePct" "YoungNonWhiteFemale" "Total"
+oldNonWhiteFemaleR = CF.diff "OldNonWhiteFemale" "OldFemale" "OldWhiteFemale"
+oldNonWhiteFemalePctR =
+  CF.ratio "OldNonWhiteFemalePct" "OldNonWhiteFemale" "Total"
+youngMalePctPopR = CF.ratio "YoungMalePctPop" "YoungMale" "Population"
+youngMalePctTotR = CF.ratio "YoungMalePctTot" "YoungMale" "Total"
 
-oldMaleR = CF.Request "OldMale"
-                      (S.fromList ["TotalMale", "YoungMale"])
-                      (CF.Compute $ CF.difference "TotalMale" "YoungMale")
-
-youngWhiteMaleR = CF.Request "YoungWhiteMale"
-                             youngWhiteMaleKeys
-                             (CF.Compute $ CF.addAll youngWhiteMaleKeys)
-youngWhiteMalePctR = CF.Request
-  "YoungWhiteMalePct"
-  (S.fromList ["YoungWhiteMale", "Total"])
-  (CF.Compute $ CF.ratio "YoungWhiteMale" "Total")
-
-oldWhiteMaleR = CF.Request
-  "OldWhiteMale"
-  (S.fromList ["TotalWhiteMale", "YoungWhiteMale"])
-  (CF.Compute $ CF.difference "TotalWhiteMale" "YoungWhiteMale")
-
-oldWhiteMalePctR = CF.Request "OldWhiteMalePct"
-                              (S.fromList ["OldWhiteMale", "Total"])
-                              (CF.Compute $ CF.ratio "OldWhiteMale" "Total")
-
-youngNonWhiteMaleR = CF.Request
-  "YoungNonWhiteMale"
-  (S.fromList ["YoungMale", "YoungWhiteMale"])
-  (CF.Compute $ CF.difference "YoungMale" "YoungWhiteMale")
-youngNonWhiteMalePctR = CF.Request
-  "YoungNonWhiteMalePct"
-  (S.fromList ["YoungNonWhiteMale", "Total"])
-  (CF.Compute $ CF.ratio "YoungNonWhiteMale" "Total")
-
-oldNonWhiteMaleR = CF.Request
-  "OldNonWhiteMale"
-  (S.fromList ["OldMale", "OldWhiteMale"])
-  (CF.Compute $ CF.difference "OldMale" "OldWhiteMale")
-oldNonWhiteMalePctR = CF.Request
-  "OldNonWhiteMalePct"
-  (S.fromList ["OldNonWhiteMale", "Total"])
-  (CF.Compute $ CF.ratio "OldNonWhiteMale" "Total")
-
-
-youngFemaleR = CF.Request "YoungFemale"
-                          youngFemaleKeys
-                          (CF.Compute $ CF.addAll youngFemaleKeys)
-
-oldFemaleR = CF.Request
-  "OldFemale"
-  (S.fromList ["TotalFemale", "YoungFemale"])
-  (CF.Compute $ CF.difference "TotalFemale" "YoungFemale")
-
-youngWhiteFemaleR = CF.Request "YoungWhiteFemale"
-                               youngWhiteFemaleKeys
-                               (CF.Compute $ CF.addAll youngWhiteFemaleKeys)
-
-youngWhiteFemalePctR = CF.Request
-  "YoungWhiteFemalePct"
-  (S.fromList ["YoungWhiteFemale", "Total"])
-  (CF.Compute $ CF.ratio "YoungWhiteFemale" "Total")
-
-oldWhiteFemaleR = CF.Request
-  "OldWhiteFemale"
-  (S.fromList ["TotalWhiteFemale", "YoungWhiteFemale"])
-  (CF.Compute $ CF.difference "TotalWhiteFemale" "YoungWhiteFemale")
-
-oldWhiteFemalePctR = CF.Request
-  "OldWhiteFemalePct"
-  (S.fromList ["OldWhiteFemale", "Total"])
-  (CF.Compute $ CF.ratio "OldWhiteFemale" "Total")
-
-youngNonWhiteFemaleR = CF.Request
-  "YoungNonWhiteFemale"
-  (S.fromList ["YoungFemale", "YoungWhiteFemale"])
-  (CF.Compute $ CF.difference "YoungFemale" "YoungWhiteFemale")
-youngNonWhiteFemalePctR = CF.Request
-  "YoungNonWhiteFemalePct"
-  (S.fromList ["YoungNonWhiteFemale", "Total"])
-  (CF.Compute $ CF.ratio "YoungNonWhiteFemale" "Total")
-
-oldNonWhiteFemaleR = CF.Request
-  "OldNonWhiteFemale"
-  (S.fromList ["OldFemale", "OldWhiteFemale"])
-  (CF.Compute $ CF.difference "OldFemale" "OldWhiteFemale")
-oldNonWhiteFemalePctR = CF.Request
-  "OldNonWhiteFemalePct"
-  (S.fromList ["OldNonWhiteFemale", "Total"])
-  (CF.Compute $ CF.ratio "OldNonWhiteFemale" "Total")
-
-
-youngMalePctPopR = CF.Request
-  "YoungMalePctPop"
-  (S.fromList ["YoungMale", "Population"])
-  (CF.Compute $ CF.ratio "YoungMale" "Population")
-
-youngMalePctTotR = CF.Request "YoungMalePctTot"
-                              (S.fromList ["YoungMale", "Total"])
-                              (CF.Compute $ CF.ratio "YoungMale" "Total")
 
 
 

@@ -1,6 +1,7 @@
 {-# LANGUAGE AllowAmbiguousTypes       #-}
 {-# LANGUAGE DataKinds                 #-}
 {-# LANGUAGE DeriveGeneric             #-}
+{-# LANGUAGE DeriveFunctor             #-}
 {-# LANGUAGE FlexibleContexts          #-}
 {-# LANGUAGE FlexibleInstances         #-}
 {-# LANGUAGE GADTs                     #-}
@@ -16,6 +17,7 @@
 {-# LANGUAGE TypeOperators             #-}
 {-# LANGUAGE UndecidableInstances      #-}
 {-# LANGUAGE Rank2Types                #-}
+{-# LANGUAGE ApplicativeDo              #-}
 module Census.ComputedFields where
 
 import qualified Control.Foldl                 as FL
@@ -28,6 +30,18 @@ import           Control.Lens                   ( Getter
                                                 , preview
                                                 , firstOf
                                                 )
+import           Control.Monad.Reader           ( ReaderT
+                                                , runReaderT
+                                                , ask
+                                                , MonadReader(..)
+                                                , lift
+                                                )
+import           Control.Monad.Writer           ( Writer
+                                                , runWriter
+                                                , tell
+--                                                , MonadWriter(..)
+                                                )
+
 import qualified Data.Foldable                 as Fold
 import qualified Data.HashMap.Lazy             as HML
 import qualified Data.List                     as L
@@ -164,6 +178,46 @@ objectToArray keys o = fmap Vec.fromList $ traverse
 
 -- computational helpers
 -- I need to simplify this.
+
+newtype CompM a = CompM { unCompM :: Writer (S.Set ResultKey) (ReaderT (A.Object) (Either Text) a) }
+  deriving (Functor)
+
+instance Applicative CompM where
+  pure x = CompM $ pure (pure x)
+  fab <*> a = CompM $ (fmap (<*>) $ unCompM fab) <*> (unCompM a)
+
+
+--instance Applicative CompM => Monad CompM where
+--  ma >>= f = fmap (fmap runWriter . f) ma  
+
+makeRequest :: Show a => ResultKey -> CompM a -> Request
+makeRequest key buildM =
+  let (readerT, deps) = runWriter $ unCompM buildM
+      compute o = runReaderT (fmap (A.String . T.pack . show) readerT) o
+  in  Request key deps (Compute compute)
+
+as' :: forall a . Read a => ResultKey -> CompM a
+as' key = CompM $ do
+  tell $ S.singleton key
+  return $ do
+    o       <- ask @A.Object
+    asValue <-
+      lift
+      $ maybe
+          (Left $ "Failed to find key=" <> key <> " in " <> (T.pack $ show o))
+          Right
+      $ HML.lookup key o
+    lift
+      $ maybe
+          (  Left
+          $  "Failed to convert "
+          <> (T.pack $ show asValue)
+          <> " to requested type for key="
+          <> key
+          )
+          Right
+      $ as @a asValue
+
 as :: Read a => A.Value -> Maybe a
 as (A.String x) = readMaybe (T.unpack x)
 as _            = Nothing
@@ -171,69 +225,30 @@ as _            = Nothing
 addAll
   :: forall a
    . (Show a, Read a, Num a)
-  => S.Set Text
-  -> A.Object
-  -> Either Text A.Value
-addAll keys o =
-  let filtered   = HML.filterWithKey (\k _ -> k `S.member` keys) o
-      asNumbersM = traverse (as @a) filtered
-      addedM     = fmap (Fold.foldl' (+) (0 :: a)) asNumbersM
-  in  maybe
-        (  Left
-        $  "addAll failed with keys="
-        <> (T.pack $ show keys)
-        <> " and o="
-        <> (T.pack $ show o)
-        )
-        (Right . A.String . T.pack . show)
-        addedM
+  => ResultKey
+  -> S.Set ResultKey
+  -> Request
+addAll key toAdd = makeRequest key $ do
+  as <- traverse (as' @a) $ S.toList toAdd
+  return $ Fold.foldl' (+) 0 as
 
-difference
+diff
   :: forall a
    . (Read a, Show a, Num a)
-  => Text
-  -> Text
-  -> A.Object
-  -> Either Text A.Value
-difference a b o =
-  let aM    = HML.lookup a o >>= as @a
-      bM    = HML.lookup b o >>= as @a
-      diffM = do
-        a <- aM
-        b <- bM
-        return (a - b)
-  in  maybe
-        (  Left
-        $  "difference failed with a="
-        <> (T.pack $ show a)
-        <> " and b="
-        <> (T.pack $ show b)
-        <> " and o="
-        <> (T.pack $ show o)
-        )
-        (Right . A.String . T.pack . show)
-        diffM
+  => ResultKey
+  -> ResultKey
+  -> ResultKey
+  -> Request
+diff key x y = makeRequest key $ (-) <$> (as' @a x) <*> (as' @a y)
 
-
-ratio :: Text -> Text -> A.Object -> Either Text A.Value
-ratio a b o =
-  let aM     = HML.lookup a o >>= as @Double
-      bM     = HML.lookup b o >>= as @Double
-      ratioM = do
-        a <- aM
-        b <- bM
-        return (a / b)
-  in  maybe
-        (  Left
-        $  "ratio failed with a="
-        <> (T.pack $ show a)
-        <> " and b="
-        <> (T.pack $ show b)
-        <> " and o="
-        <> (T.pack $ show o)
-        )
-        (Right . A.String . T.pack . show)
-        ratioM
+ratio
+  :: forall a
+   . (Read a, Show a, Fractional a)
+  => ResultKey
+  -> ResultKey
+  -> ResultKey
+  -> Request
+ratio key x y = makeRequest key $ (/) <$> (as' @a x) <*> (as' @a y)
 
 {-
 -- state FIPS datatypes
