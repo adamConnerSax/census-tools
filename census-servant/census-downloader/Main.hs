@@ -47,19 +47,22 @@ import qualified Pipes                   as P
 import qualified Pipes.Prelude           as P
 import qualified Pipes.Safe              as P
 
+import qualified Frames.Transform        as FT
+
+
 --type ACSFields = [Census.Population, Census.WMY, Census.WMO, Census.WFY, Census.WFO, Census.NWMY, Census.NWMO, Census.NWFY, Census.NWFO]
 
 --                  Census.WFO,Census.BMY,Census.BMO,Census.BFY,Census.BFO]
 
 type ACSFields = '[Census.Population
-                  ,Census.YoungWhiteMalePct
-                  ,Census.OldWhiteMalePct
-                  ,Census.YoungWhiteFemalePct
-                  ,Census.OldWhiteFemalePct
-                  ,Census.YoungNonWhiteMalePct
-                  ,Census.OldNonWhiteMalePct
-                  ,Census.YoungNonWhiteFemalePct
-                  ,Census.OldNonWhiteFemalePct
+                  ,Census.YoungWhiteMale
+                  ,Census.OldWhiteMale
+                  ,Census.YoungWhiteFemale
+                  ,Census.OldWhiteFemale
+                  ,Census.YoungNonWhiteMale
+                  ,Census.OldNonWhiteMale
+                  ,Census.YoungNonWhiteFemale
+                  ,Census.OldNonWhiteFemale
                   ]
 main :: IO ()
 main = do
@@ -68,10 +71,13 @@ main = do
   manager <- newManager managerSettings
   let clientEnv = mkClientEnv manager Census.baseUrl
       runServant x = Census.runX clientEnv x
-  resFEs <- sequence $ fmap (\x -> putStr (show x ++ "...") >> getOneYear @ACSFields runServant stateKeysFrame Census.AllStatesAndDistricts x) ([2017])
+      years :: [Census.YearT] = [2010,2012,2014,2016,2017]
+--      addYear :: Census.YearT -> F.Record '[Census.Year]
+      addYear y = V.rappend (FT.recordSingleton @Census.Year y)
+  resFEs <- sequence $ fmap (\x -> putStr (show x ++ "...") >> (fmap (fmap (fmap (addYear x))) $ getOneYear @ACSFields runServant stateKeysFrame Census.AllStatesAndDistricts x)) years
   let (errors,resFs) = partitionEithers resFEs
   case (List.null errors) of
-    True  -> F.writeCSV "data/test.csv" $ mconcat resFs
+    True  -> F.writeCSV ("data/identityDemographicsByDistrict2010-2017.csv") $ mconcat resFs
     False -> putStrLn $ "Some queries returned errors: " ++ show errors
   return ()
 
@@ -93,7 +99,7 @@ getOneYear :: forall fs gs. (F.ColumnHeaders fs
            => (Census.MyServantClientM (F.FrameRec (gs V.++ fs)) -> IO (Either Text (F.FrameRec (gs V.++ fs))))
            -> F.Frame Census.StateFIPSAndNames
            -> Census.GeoCode gs
-           -> Census.Year
+           -> Census.YearT
            -> IO (Either Text (F.FrameRec (ACSRes gs fs)))
 getOneYear runServant stateKeysFrame geoCode year = do
   let acsQuery = Census.getACSDataFrame' @fs Census.acsRequestDictionary year Census.ACS1 geoCode

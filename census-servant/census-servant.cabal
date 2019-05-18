@@ -69,6 +69,7 @@ executable census-downloader
                      , census-servant                     
                      , warp
                      , Frames
+                     , Frames-utils
                      , http-api-data
                      , lens
                      , pipes

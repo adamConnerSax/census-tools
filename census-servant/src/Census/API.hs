@@ -79,8 +79,8 @@ baseUrl = BaseUrl Https "api.census.gov" 443 "data"
 
 data Census_Routes route = Census_Routes
   {
-    _ACS :: route :- Capture "Year" CF.Year :> "acs" :> Capture "span" Text :> QueryParam "get" Text :> QueryParam "for" Text :> QueryParam "in" Text :> QueryParam "key" Text :> Get '[JSON] A.Value
-  , _SAIPE :: route :- "timeseries" :> "poverty" :> "saipe" :>  QueryParam "get" Text :> QueryParam "for" Text :> QueryParam "in" Text :> QueryParam "time" CF.Year :> QueryParam "key" Text :> Get '[JSON] A.Value
+    _ACS :: route :- Capture "Year" CF.YearT :> "acs" :> Capture "span" Text :> QueryParam "get" Text :> QueryParam "for" Text :> QueryParam "in" Text :> QueryParam "key" Text :> Get '[JSON] A.Value
+  , _SAIPE :: route :- "timeseries" :> "poverty" :> "saipe" :>  QueryParam "get" Text :> QueryParam "for" Text :> QueryParam "in" Text :> QueryParam "time" CF.YearT :> QueryParam "key" Text :> Get '[JSON] A.Value
   }
   deriving (Generic)
 
@@ -102,7 +102,7 @@ acsSpanToText ACS3 = "acs3"
 acsSpanToText ACS5 = "acs5"
 
 
-getACSData :: CF.Year -> ACS_Span -> CF.GeoCode a -> [Text] -> ClientM A.Value
+getACSData :: CF.YearT -> ACS_Span -> CF.GeoCode a -> [Text] -> ClientM A.Value
 getACSData year span geoCode codes =
   let (forM, inM) = CF.geoCodeToQuery geoCode
       getQ        = Just $ intercalate "," codes
@@ -128,7 +128,7 @@ getACSDataFrame'
      , RecordToList (gs ++ fs)
      )
   => CF.RequestDictionary
-  -> CF.Year
+  -> CF.YearT
   -> ACS_Span
   -> CF.GeoCode gs
   -> X.ExceptT Text ClientM (F.FrameRec (gs V.++ fs))

@@ -1,4 +1,4 @@
-packages: ./census-servant
+packages: ./census-servant ../Frames-utils
 jobs: 4
 with-compiler: /usr/local/bin/ghc
 

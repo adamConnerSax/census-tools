@@ -51,19 +51,19 @@ F.tableTypes "StateFIPSAndNames" "../conversion-data/states.csv"  -- declares St
 F.declareColumn "CountyFIPS" ''Int -- = "countyFIPS" :-> Int
 F.declareColumn "CongressionalDistrict" ''Int -- = "countyFIPS" :-> Int
 
-type Year = Int
-F.declareColumn "YearF" ''Year
+type YearT = Int
+F.declareColumn "Year" ''YearT
 
 F.declareColumn "Population" ''Int
 F.declareColumn "YoungMale" ''Int
-F.declareColumn "YoungWhiteMalePct" ''Double
-F.declareColumn "OldWhiteMalePct" ''Double
-F.declareColumn "YoungWhiteFemalePct" ''Double
-F.declareColumn "OldWhiteFemalePct" ''Double
-F.declareColumn "YoungNonWhiteMalePct" ''Double
-F.declareColumn "OldNonWhiteMalePct" ''Double
-F.declareColumn "YoungNonWhiteFemalePct" ''Double
-F.declareColumn "OldNonWhiteFemalePct" ''Double
+F.declareColumn "YoungWhiteMale" ''Int
+F.declareColumn "OldWhiteMale" ''Int
+F.declareColumn "YoungWhiteFemale" ''Int
+F.declareColumn "OldWhiteFemale" ''Int
+F.declareColumn "YoungNonWhiteMale" ''Int
+F.declareColumn "OldNonWhiteMale" ''Int
+F.declareColumn "YoungNonWhiteFemale" ''Int
+F.declareColumn "OldNonWhiteFemale" ''Int
 
 
 F.declareColumn "YoungMalePctPop" ''Double
@@ -162,28 +162,46 @@ youngFemaleCodes =
 
 youngWhiteMaleCodes :: [(Text, Text)]
 youngWhiteMaleCodes =
-  [ ("B01001A_003E", "WhiteMaleUnder5")
-  , ("B01001A_004E", "WhiteMale5To9")
-  , ("B01001A_005E", "WhiteMale10To14")
-  , ("B01001A_006E", "WhiteMale15To17")
-  , ("B01001A_007E", "WhiteMale18To19")
-  , ("B01001A_008E", "WhiteMale20To24")
-  , ("B01001A_009E", "WhiteMale25To29")
-  , ("B01001A_010E", "WhiteMale30To34")
-  , ("B01001A_011E", "WhiteMale35To44")
+  [ ("B01001H_003E", "WhiteMaleUnder5")
+  , ("B01001H_004E", "WhiteMale5To9")
+  , ("B01001H_005E", "WhiteMale10To14")
+  , ("B01001H_006E", "WhiteMale15To17")
+  , ("B01001H_007E", "WhiteMale18To19")
+  , ("B01001H_008E", "WhiteMale20To24")
+  , ("B01001H_009E", "WhiteMale25To29")
+  , ("B01001H_010E", "WhiteMale30To34")
+  , ("B01001H_011E", "WhiteMale35To44")
+  ]
+
+oldWhiteMaleCodes :: [(Text, Text)]
+oldWhiteMaleCodes =
+  [ ("B01001H_012E", "WhiteMale45To54")
+  , ("B01001H_013E", "WhiteMale55To64")
+  , ("B01001H_014E", "WhiteMale65To74")
+  , ("B01001H_015E", "WhiteMale75To84")
+  , ("B01001H_016E", "WhiteMale85AndOver")
   ]
 
 youngWhiteFemaleCodes :: [(Text, Text)]
 youngWhiteFemaleCodes =
-  [ ("B01001A_018E", "WhiteFemaleUnder5")
-  , ("B01001A_019E", "WhiteFemale5To9")
-  , ("B01001A_020E", "WhiteFemale10To14")
-  , ("B01001A_021E", "WhiteFemale15To17")
-  , ("B01001A_022E", "WhiteFemale18To19")
-  , ("B01001A_023E", "WhiteFemale20To24")
-  , ("B01001A_024E", "WhiteFemale25To29")
-  , ("B01001A_025E", "WhiteFemale30To34")
-  , ("B01001A_026E", "WhiteFemale35To44")
+  [ ("B01001H_018E", "WhiteFemaleUnder5")
+  , ("B01001H_019E", "WhiteFemale5To9")
+  , ("B01001H_020E", "WhiteFemale10To14")
+  , ("B01001H_021E", "WhiteFemale15To17")
+  , ("B01001H_022E", "WhiteFemale18To19")
+  , ("B01001H_023E", "WhiteFemale20To24")
+  , ("B01001H_024E", "WhiteFemale25To29")
+  , ("B01001H_025E", "WhiteFemale30To34")
+  , ("B01001H_026E", "WhiteFemale35To44")
+  ]
+
+oldWhiteFemaleCodes :: [(Text, Text)]
+oldWhiteFemaleCodes =
+  [ ("B01001H_027E", "WhiteFemale45To54")
+  , ("B01001H_028E", "WhiteFemale55To64")
+  , ("B01001H_029E", "WhiteFemale65To74")
+  , ("B01001H_030E", "WhiteFemale75To84")
+  , ("B01001H_031E", "WhiteFemale85AndOver")
   ]
 
 youngBlackMaleCodes :: [(Text, Text)]
@@ -199,6 +217,16 @@ youngBlackMaleCodes =
   , ("B01001B_011E", "BlackMale35To44")
   ]
 
+oldBlackMaleCodes :: [(Text, Text)]
+oldBlackMaleCodes =
+  [ ("B01001B_012E", "BlackMale45To54")
+  , ("B01001B_013E", "BlackMale55To64")
+  , ("B01001B_014E", "BlackMale65To74")
+  , ("B01001B_015E", "BlackMale75To84")
+  , ("B01001B_016E", "BlackMale85AndOver")
+  ]
+
+
 youngBlackFemaleCodes :: [(Text, Text)]
 youngBlackFemaleCodes =
   [ ("B01001B_018E", "BlackFemaleUnder5")
@@ -211,6 +239,106 @@ youngBlackFemaleCodes =
   , ("B01001B_025E", "BlackFemale30To34")
   , ("B01001B_026E", "BlackFemale35To44")
   ]
+
+oldBlackFemaleCodes :: [(Text, Text)]
+oldBlackFemaleCodes =
+  [ ("B01001B_027E", "BlackFemale45To54")
+  , ("B01001B_028E", "BlackFemale55To64")
+  , ("B01001B_029E", "BlackFemale65To74")
+  , ("B01001B_030E", "BlackFemale75To84")
+  , ("B01001B_031E", "BlackFemale85AndOver")
+  ]
+
+youngAsianMaleCodes :: [(Text, Text)]
+youngAsianMaleCodes =
+  [ ("B01001D_003E", "BlackMaleUnder5")
+  , ("B01001D_004E", "BlackMale5To9")
+  , ("B01001D_005E", "BlackMale10To14")
+  , ("B01001D_006E", "BlackMale15To17")
+  , ("B01001D_007E", "BlackMale18To19")
+  , ("B01001D_008E", "BlackMale20To24")
+  , ("B01001D_009E", "BlackMale25To29")
+  , ("B01001D_010E", "BlackMale30To34")
+  , ("B01001D_011E", "BlackMale35To44")
+  ]
+
+oldAsianMaleCodes :: [(Text, Text)]
+oldAsianMaleCodes =
+  [ ("B01001D_012E", "BlackMale45To54")
+  , ("B01001D_013E", "BlackMale55To64")
+  , ("B01001D_014E", "BlackMale65To74")
+  , ("B01001D_015E", "BlackMale75To84")
+  , ("B01001D_016E", "BlackMale85AndOver")
+  ]
+
+
+youngAsianFemaleCodes :: [(Text, Text)]
+youngAsianFemaleCodes =
+  [ ("B01001D_018E", "BlackFemaleUnder5")
+  , ("B01001D_019E", "BlackFemale5To9")
+  , ("B01001D_020E", "BlackFemale10To14")
+  , ("B01001D_021E", "BlackFemale15To17")
+  , ("B01001D_022E", "BlackFemale18To19")
+  , ("B01001D_023E", "BlackFemale20To24")
+  , ("B01001D_024E", "BlackFemale25To29")
+  , ("B01001D_025E", "BlackFemale30To34")
+  , ("B01001D_026E", "BlackFemale35To44")
+  ]
+
+oldAsianFemaleCodes :: [(Text, Text)]
+oldAsianFemaleCodes =
+  [ ("B01001D_027E", "BlackFemale45To54")
+  , ("B01001D_028E", "BlackFemale55To64")
+  , ("B01001D_029E", "BlackFemale65To74")
+  , ("B01001D_030E", "BlackFemale75To84")
+  , ("B01001D_031E", "BlackFemale85AndOver")
+  ]
+
+youngHispanicMaleCodes :: [(Text, Text)]
+youngHIspanicMaleCodes =
+  [ ("B01001I_003E", "BlackMaleUnder5")
+  , ("B01001I_004E", "BlackMale5To9")
+  , ("B01001I_005E", "BlackMale10To14")
+  , ("B01001I_006E", "BlackMale15To17")
+  , ("B01001I_007E", "BlackMale18To19")
+  , ("B01001I_008E", "BlackMale20To24")
+  , ("B01001I_009E", "BlackMale25To29")
+  , ("B01001I_010E", "BlackMale30To34")
+  , ("B01001I_011E", "BlackMale35To44")
+  ]
+
+oldHispanicMaleCodes :: [(Text, Text)]
+oldHispanicMaleCodes =
+  [ ("B01001I_012E", "BlackMale45To54")
+  , ("B01001I_013E", "BlackMale55To64")
+  , ("B01001I_014E", "BlackMale65To74")
+  , ("B01001I_015E", "BlackMale75To84")
+  , ("B01001I_016E", "BlackMale85AndOver")
+  ]
+
+
+youngHispanicFemaleCodes :: [(Text, Text)]
+youngHispanicFemaleCodes =
+  [ ("B01001I_018E", "BlackFemaleUnder5")
+  , ("B01001I_019E", "BlackFemale5To9")
+  , ("B01001I_020E", "BlackFemale10To14")
+  , ("B01001I_021E", "BlackFemale15To17")
+  , ("B01001I_022E", "BlackFemale18To19")
+  , ("B01001I_023E", "BlackFemale20To24")
+  , ("B01001I_024E", "BlackFemale25To29")
+  , ("B01001I_025E", "BlackFemale30To34")
+  , ("B01001I_026E", "BlackFemale35To44")
+  ]
+
+oldHispanicFemaleCodes :: [(Text, Text)]
+oldHispanicFemaleCodes =
+  [ ("B01001I_027E", "BlackFemale45To54")
+  , ("B01001I_028E", "BlackFemale55To64")
+  , ("B01001I_029E", "BlackFemale65To74")
+  , ("B01001I_030E", "BlackFemale75To84")
+  , ("B01001I_031E", "BlackFemale85AndOver")
+  ]
+
 
 
 codes :: [(Text, Text)]
