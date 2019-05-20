@@ -48,6 +48,7 @@ library
                      , servant-client
                      , servant-server
                      , servant
+                     , split
                      , time
                      , transformers
                      , type-level-sets

@@ -17,7 +17,7 @@
 {-# LANGUAGE TypeOperators             #-}
 {-# LANGUAGE UndecidableInstances      #-}
 {-# LANGUAGE Rank2Types                #-}
-{-# LANGUAGE ApplicativeDo              #-}
+{-# LANGUAGE ApplicativeDo             #-}
 module Census.ComputedFields where
 
 import qualified Control.Foldl                 as FL
@@ -41,9 +41,10 @@ import           Control.Monad.Writer           ( Writer
                                                 , tell
 --                                                , MonadWriter(..)
                                                 )
+import qualified Control.Monad.Except          as X
 
 import qualified Data.Foldable                 as Fold
-import qualified Data.HashMap.Lazy             as HML
+import qualified Data.HashMap.Strict           as HM
 import qualified Data.List                     as L
 import qualified Data.Graph                    as G
 import           Data.Maybe                     ( catMaybes
@@ -83,10 +84,29 @@ data GetResult = Query Text | Compute (A.Object -> Either Text A.Value)
 data Request = Request { qdKey :: ResultKey, qdDependencies :: S.Set ResultKey, qdCompute :: GetResult }
 
 printRequest :: Request -> Text
-printRequest (Request k deps _) =
-  "key=" <> k <> "; deps=" <> (T.pack $ show $ S.toList deps)
+printRequest (Request k deps gr) =
+  let grType = case gr of
+        Query   t -> "Query (key=" <> t
+        Compute _ -> "Compute"
+  in  "key="
+      <> k
+      <> "; deps="
+      <> (T.pack $ show $ S.toList deps)
+      <> "; type="
+      <> grType
 
-newtype RequestDictionary = RequestDictionary (M.Map ResultKey Request)
+newtype RequestDictionary = RequestDictionary { unRequestDictionary :: M.Map ResultKey Request }
+
+emptyRequestDictionary :: RequestDictionary
+emptyRequestDictionary = RequestDictionary M.empty
+
+addRequests :: Foldable f => f Request -> RequestDictionary -> RequestDictionary
+addRequests rs rd = FL.fold
+  (FL.Fold (\m r -> M.insert (qdKey r) r m)
+           (unRequestDictionary rd)
+           RequestDictionary
+  )
+  rs
 
 newtype SortedRequests = SortedRequests [Request] -- sorted by dependency, x depends on y <=> y < x 
 
@@ -123,14 +143,16 @@ keyedValue t = \o ->
   maybe
       (Left $ "Lookup failed for key=" <> t <> " in o=" <> (T.pack $ show o))
       Right
-    $ HML.lookup t o
+    $ HM.lookup t o
 
 -- | Helper for the query case
 query :: Text -> ResultKey -> [Request]
-query queryText key =
-  [ Request queryText S.empty                 (Query queryText)
-  , Request key       (S.singleton queryText) (Compute $ keyedValue queryText)
-  ]
+query queryText key = if (queryText == key)
+  then [Request queryText S.empty (Query queryText)]
+  else
+    [ Request queryText S.empty                 (Query queryText)
+    , Request key       (S.singleton queryText) (Compute $ keyedValue queryText)
+    ]
 -- | Helper for things in the query but not queried for, like geography
 inQuery :: Text -> Text -> (Text, Request)
 inQuery returnedHeader key =
@@ -153,13 +175,16 @@ missingDependencies (SortedRequests rs) = FL.fold
     (S.insert k have)
     (if deps `S.isSubsetOf` have then missing else k : missing)
 
+eitherToX :: Monad m => (e -> Text) -> Either e a -> X.ExceptT Text m a
+eitherToX toText = either (X.throwError . toText) return
+
 processRequestsF :: A.Object -> FL.Fold Request (Either Text A.Object)
 processRequestsF queried = FL.Fold doRequest (Right queried) id
  where
   doRequest :: Either Text A.Object -> Request -> Either Text A.Object
   doRequest eto (Request _ _ (Query _)) = eto
   doRequest (Right o) (Request k _ (Compute f)) =
-    fmap (\v -> HML.insert k v o) $ f o
+    fmap (\v -> HM.insert k v o) $ f o
   doRequest (Left t) _ = Left t
 
 processRequests :: SortedRequests -> A.Object -> Either Text A.Object
@@ -172,7 +197,7 @@ objectToArray keys o = fmap Vec.fromList $ traverse
     maybe
         (Left $ "Lookup failed for key=" <> k <> " in " <> (T.pack $ show o))
         Right
-      $ HML.lookup k o
+      $ HM.lookup k o
   )
   keys
 
@@ -206,7 +231,7 @@ as' key = CompM $ do
       $ maybe
           (Left $ "Failed to find key=" <> key <> " in " <> (T.pack $ show o))
           Right
-      $ HML.lookup key o
+      $ HM.lookup key o
     lift
       $ maybe
           (  Left

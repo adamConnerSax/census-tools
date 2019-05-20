@@ -14,7 +14,11 @@
 {-# LANGUAGE TypeApplications          #-}
 {-# LANGUAGE ConstraintKinds           #-}
 {-# LANGUAGE AllowAmbiguousTypes       #-}
-module Census.API where
+module Census.API
+  ( module Census.API
+  , CF.ResultKey
+  )
+where
 
 import qualified Census.ComputedFields         as CF
 import qualified Census.Fields                 as CF
@@ -25,6 +29,7 @@ import           Servant.Client
 import           Servant.Client.Generic
 
 import           Control.Exception.Safe         ( throw )
+import qualified Control.Foldl                 as FL
 import           Control.Lens                   ( (^.)
                                                 , (^..)
                                                 , (^?)
@@ -44,8 +49,10 @@ import qualified Data.Aeson.Types              as A
 import qualified Data.Aeson.Lens               as L
 import           Data.ByteString.Lazy           ( fromStrict )
 import qualified Data.Foldable                 as F
-import qualified Data.HashMap.Lazy             as HML
+import qualified Data.HashMap.Strict           as HM
 import qualified Data.List                     as List
+import qualified Data.List.Split               as LS
+import qualified Data.Map                      as M
 import           Data.Maybe                     ( fromMaybe )
 import           Data.Monoid                    ( (<>) )
 import           Data.Proxy                     ( Proxy() )
@@ -55,6 +62,7 @@ import           Data.Text                      ( Text
                                                 , unpack
                                                 , pack
                                                 )
+import qualified Text.Read                     as TR
 import           Data.Text.Encoding             ( encodeUtf8 )
 import           Data.Vector                    ( Vector )
 import qualified Data.Vector                   as Vec
@@ -114,6 +122,112 @@ getACSData year span geoCode codes =
                            (Just censusApiKey)
 
 
+type ACSKey = "ACSKey" F.:-> Text
+type ACSCount = "ACSCount" F.:-> Int
+
+type ACSKeyedCount = '[ACSKey, ACSCount]
+
+maxFieldsPerQuery = 50
+
+getACSCountsLong
+  :: forall f gs
+   . ( ColumnHeaders gs
+     , Ord (F.Record gs)
+     , RecVec (gs ++ ACSKeyedCount)
+     , Foldable f
+     )
+  => CF.RequestDictionary
+  -> f CF.ResultKey
+  -> CF.YearT
+  -> ACS_Span
+  -> CF.GeoCode gs
+  -> Int
+  -> X.ExceptT
+       Text
+       ClientM
+       (F.FrameRec (gs ++ ACSKeyedCount))
+getACSCountsLong rDict countKeys year span geoCode maxCodesPerQuery = do
+  let gColHeaders = fmap pack $ F.columnHeaders (Proxy :: Proxy (F.Record gs))
+      fColHeaders =
+        fmap pack $ F.columnHeaders (Proxy :: Proxy (F.Record ACSKeyedCount))
+      keySet       = S.fromList (gColHeaders ++ F.toList countKeys)
+      dictWithGeos = CF.addGeoCodeRequests geoCode rDict -- geoCode cols need to be added
+  requests <- either X.throwError return $ CF.getRequests dictWithGeos keySet
+--  liftIO $ putStrLn $ show $ CF.printSortedRequests requests
+  -- given the keys and an array of returned values 
+  let
+    compute :: Vec.Vector Text -> A.Array -> Either Text A.Object
+    compute keys =
+      CF.processRequests requests . HM.fromList . Vec.toList . Vec.zip keys
+    queryChunks =
+      LS.chunksOf maxCodesPerQuery $ S.toList $ CF.getFieldsToQuery requests
+    queryToObject
+      :: Monad m => A.Value -> X.ExceptT Text m (M.Map (F.Record gs) A.Object)
+    queryToObject v = do
+      let headersM :: Maybe (Vec.Vector Text)
+          headersM =
+            join $ traverse (traverse (^? L._String)) (v ^? L.nth 0 . L._Array)
+          rowList :: [Vec.Vector A.Value]
+          rowList = tail (v ^.. L.values . L._Array) -- tail here to get rid of header row
+      headers <- maybe
+        (throwError $ "problem extracting headers from " <> (pack $ show v))
+        return
+        headersM
+      X.when (length rowList == 0) $ throwError "rowList returned no rows"
+--    X.ExceptT m (Vec.Vector (F.Record gs, M.Map Text A.Value))
+      rowMaps <- traverse
+        (CF.geoDecode geoCode . HM.fromList . Vec.toList . Vec.zip headers)
+        rowList
+      return $ M.fromList rowMaps -- at this point, per query, we have only one line per geocode
+    doOneQuery queryCodes =
+      (X.lift (getACSData year span geoCode queryCodes) >>= queryToObject)
+  liftIO $ putStrLn $ show $ queryChunks
+  queryRes <- traverse doOneQuery queryChunks -- [Map (F.Record gs) A.Object]
+  let queryResMap = M.unionsWith (<>) queryRes
+  processedQueryRes <- traverse
+    (CF.eitherToX id . CF.processRequests requests)
+    queryResMap -- Map (F.Record gs) A.Object
+  let
+    toValueRecord
+      :: Monad m => (Text, A.Value) -> X.ExceptT Text m (F.Record ACSKeyedCount)
+    toValueRecord (key, aValue) = do
+      let r2X :: Monad m => A.Result a -> X.ExceptT Text m a
+          r2X r = case r of
+            A.Success a -> return a
+            A.Error   s -> throwError $ "AesonError: " <> (pack s)
+      datAsString <- r2X (A.fromJSON aValue)
+      val         <-
+        maybe
+            (  throwError
+            $  "Failed to parse \""
+            <> (pack datAsString)
+            <> "\" as Int"
+            )
+            return
+          $ TR.readMaybe datAsString
+      return $ key F.&: val F.&: V.RNil
+    objectToRequestedList
+      :: (Foldable f, Monad m)
+      => f CF.ResultKey
+      -> A.Object
+      -> X.ExceptT Text m [(Text, A.Value)]
+    objectToRequestedList requestKeys o =
+      traverse
+          (\k ->
+            maybe (throwError $ "Lookup failed for key=" <> k)
+                  (\x -> return (k, x))
+              $ HM.lookup k o
+          )
+        $ FL.fold FL.list requestKeys
+  mapOfRequested <- traverse (objectToRequestedList countKeys) processedQueryRes
+  mapOfFrames    <- traverse (traverse toValueRecord) mapOfRequested -- Map (F.Record gs) [F.Record ACSKeyedCount]
+  return
+    $ F.toFrame
+    $ concat
+    $ fmap (\(keyRec, dataRecs) -> fmap (keyRec `V.rappend`) dataRecs)
+    $ M.toList mapOfFrames
+
+
 mergeEithers (Right x) = x
 mergeEithers (Left  y) = Left y
 
@@ -144,9 +258,10 @@ getACSDataFrame' dict year span geoCode = do
         mergeEithers
           . fmap (CF.objectToArray (gColHeaders ++ fColHeaders))
           . CF.processRequests requests
-          . HML.fromList
+          . HM.fromList
           . Vec.toList
           . Vec.zip keys
+
   queried <- X.lift
     $ getACSData year span geoCode (S.toList $ CF.getFieldsToQuery requests)
   let headersM :: Maybe (Vec.Vector Text) = join
@@ -222,61 +337,3 @@ eitherRecordPrint eRec = case (F.rtraverse V.getCompose eRec) of
 
 
 
-{-
-type QueryFieldsC d gs fs = ( CF.QueryFields d fs
-                            , ColumnHeaders (CF.QueryCodes d fs)
-                            , gs F.⊆ ((CF.QueryCodes d fs) V.++ gs)
-                            , (CF.QueryCodes d fs) F.⊆ ((CF.QueryCodes d fs) V.++ gs)
-                            , V.RecordToList ((CF.QueryCodes d fs) V.++ gs)
-                            , V.ReifyConstraint Show V.ElField ((CF.QueryCodes d fs) V.++ gs)
-                            , RMap ((CF.QueryCodes d fs) V.++ gs)
-                            , FI.RecVec ((CF.QueryCodes d fs) V.++ gs)
-                            , F.ReadRec ((CF.QueryCodes d fs) V.++ gs))
-
-getACSDataFrame
-  :: forall fs gs
-   . QueryFieldsC CF.ACS gs fs
-  => CF.Year
-  -> ACS_Span
-  -> CF.GeoCode gs
-  -> ClientM (F.FrameRec (gs V.++ fs))
-getACSDataFrame year span geoCode = do
-  asAeson <- getACSData year span geoCode (CF.queryCodes @CF.ACS @fs)
-  rawFrame :: F.FrameRec ((CF.QueryCodes CF.ACS fs) V.++ gs) <-
-    liftIO
-    $     FI.inCoreAoS
-    $     jsonArraysToRecordPipe (return asAeson)
-    P.>-> mapEither
-  let f r = (F.rcast @gs r) F.<+> (CF.makeQRec @CF.ACS @fs $ F.rcast r)
-  return $ fmap f rawFrame
--}
-
-
-{-
-getSAIPEData :: CF.Year -> CF.GeoCode a -> [Text] -> ClientM A.Value
-getSAIPEData year geo codes =
-  let (forM, inM) = CF.geoCodeToQuery geo
-  in  (_SAIPE censusClients) (Just $ intercalate "," codes)
-                             forM
-                             inM
-                             (Just year)
-                             (Just censusApiKey)
-
-
-getSAIPEDataFrame
-  :: forall fs gs
-   . QueryFieldsC CF.SAIPE gs fs
-  => CF.Year
-  -> CF.GeoCode gs
-  -> ClientM (F.FrameRec (gs V.++ fs))
-getSAIPEDataFrame year geoCode = do
-  asAeson <- getSAIPEData year geoCode (CF.queryCodes @CF.SAIPE @fs)
-  rawFrame :: F.FrameRec ((CF.QueryCodes CF.SAIPE fs) V.++ gs) <-
-    liftIO
-    $     FI.inCoreAoS
-    $     jsonArraysToRecordPipe (return asAeson)
-    P.>-> mapEither
-  let f r = (F.rcast @gs r) F.<+> (CF.makeQRec @CF.SAIPE @fs $ F.rcast r)
-  return $ fmap f rawFrame
-
--}
