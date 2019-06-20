@@ -138,6 +138,8 @@ data GenderT = Female | Male deriving (Enum,Bounded,Eq,Ord,Show)
 data RaceT = Black | Hispanic | Asian | Native | Pacific | WhiteAlone | WhiteNonHispanic  deriving (Enum,Bounded,Eq,Ord,Show)
 data AgeT = A18To24 | A25To44 | A45To64 | A65To74 | A75AndOver deriving (Enum,Bounded,Eq,Ord,Show)
 
+data EducationT = LessThan9th | LessThan12th | HighSchool | SomeCollege | Associates | Bachelors | AdvancedDegree
+data AgeForET = AE18To24 | AE25To44 | AE45To64 | AE65AndOver
 ageKey :: AgeT -> CF.ResultKey
 ageKey A18To24    = "18To24"
 ageKey A25To44    = "25To44"
@@ -166,6 +168,33 @@ zeroPaddedText numChars n =
       m = max 0 $ numChars - length s
   in  T.pack $ replicate m '0' ++ s
 
+-- NB: These are each one request but lets keep the signatures similar 
+gaeRequests :: GenderT -> AgeT -> EducationT -> CF.ResultKey -> [CF.Request]
+gaeRequests g a e key =
+  let code_number = case (g, a, e) of
+        (Male, AE18To24, LessThan9th) -> [4]
+        (Male, AE18To24, LessThan12th) -> [5]
+        (Male, AE18To24, HighSchool) -> [6]
+        (Male, AE18To24, SomeCollege) -> [7]
+        (Male, AE18To24, Associates) -> [8]
+        (Male, AE18To24, Bachelors) -> [9]
+        (Male, AE18To24, AdvancedDegree) -> [10]
+        (Male, AE25To44, LessThan9th) -> [12,20]
+        (Male, AE25To44, LessThan12th) -> [13,21]
+        (Male, AE25To44, HighSchool) -> [14,22]
+        (Male, AE25To44, SomeCollege) -> [15,23]
+        (Male, AE25To44, Associates) -> [16,24]
+        (Male, AE25To44, Bachelors) -> [17,25]
+        (Male, AE35To44, AdvancedDegree) -> [18,26]
+        (Male, AE45To64, LessThan9th) -> [28]
+        (Male, AE45To64, LessThan12th) -> [29]
+        (Male, AE45To64, HighSchool) -> [30]
+        (Male, AE45To64, SomeCollege) -> [31]
+        (Male, AE45To64, Associates) -> [32]
+        (Male, AE45To64, Bachelors) -> [33]
+        (Male, AE45To64, AdvancedDegree) -> [34]
+        
+          
 gaRequests :: GenderT -> AgeT -> CF.ResultKey -> [CF.Request]
 gaRequests g a key =
   let code_numbers = case (g, a) of
