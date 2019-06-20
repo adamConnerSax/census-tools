@@ -94,7 +94,7 @@ main = do
         >> (fmap (fmap (fmap (addYear x))) $ getOneYearLong
              runServant
              stateKeysFrame
-             Census.acsGRAKeys
+             Census.acsGAEKeys
              Census.AllStatesAndDistricts
              x
            )
@@ -181,7 +181,7 @@ getOneYearLong
            )
        )
 getOneYearLong runServant stateKeysFrame requestedDataKeys geoCode year = do
-  let acsQuery = Census.getACSCountsLong Census.acsGRARequestDictionary
+  let acsQuery = Census.getACSCountsLong Census.acsGAERequestDictionary
                                          requestedDataKeys
                                          year
                                          Census.ACS1

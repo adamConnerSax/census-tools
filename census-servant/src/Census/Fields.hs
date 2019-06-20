@@ -134,6 +134,11 @@ acsGRARequestDictionary =
 
 acsGRAKeys = allWNHKeys ++ allGAKeys
 
+acsGAERequestDictionary =
+  CF.addRequests allGAERequests CF.emptyRequestDictionary
+
+acsGAEKeys = allGAEKeys
+
 data GenderT = Female | Male deriving (Enum,Bounded,Eq,Ord,Show)
 data RaceT = Black | Hispanic | Asian | Native | Pacific | WhiteAlone | WhiteNonHispanic  deriving (Enum,Bounded,Eq,Ord,Show)
 data AgeRT = A18To24 | A25To44 | A45To64 | A65To74 | A75AndOver deriving (Enum,Bounded,Eq,Ord,Show)
