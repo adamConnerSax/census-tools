@@ -102,7 +102,7 @@ main = do
     years
   let (errors, resFs) = partitionEithers resFEs
   case (List.null errors) of
-    True  -> F.writeCSV ("data/test.csv") $ mconcat resFs
+    True  -> F.writeCSV ("data/census-download.csv") $ mconcat resFs
     False -> putStrLn $ "Some queries returned errors: " ++ show errors
   return ()
 

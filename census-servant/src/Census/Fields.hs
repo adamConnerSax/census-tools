@@ -136,22 +136,32 @@ acsGRAKeys = allWNHKeys ++ allGAKeys
 
 data GenderT = Female | Male deriving (Enum,Bounded,Eq,Ord,Show)
 data RaceT = Black | Hispanic | Asian | Native | Pacific | WhiteAlone | WhiteNonHispanic  deriving (Enum,Bounded,Eq,Ord,Show)
-data AgeT = A18To24 | A25To44 | A45To64 | A65To74 | A75AndOver deriving (Enum,Bounded,Eq,Ord,Show)
+data AgeRT = A18To24 | A25To44 | A45To64 | A65To74 | A75AndOver deriving (Enum,Bounded,Eq,Ord,Show)
 
-data EducationT = LessThan9th | LessThan12th | HighSchool | SomeCollege | Associates | Bachelors | AdvancedDegree
-data AgeForET = AE18To24 | AE25To44 | AE45To64 | AE65AndOver
-ageKey :: AgeT -> CF.ResultKey
-ageKey A18To24    = "18To24"
-ageKey A25To44    = "25To44"
-ageKey A45To64    = "45To64"
-ageKey A65To74    = "65To74"
-ageKey A75AndOver = "75AndOver"
+data EducationT = LessThan9th | LessThan12th | HighSchool | SomeCollege | Associates | Bachelors | AdvancedDegree deriving (Enum, Bounded, Eq, Ord, Show)
+data AgeET = AE18To24 | AE25To44 | AE45To64 | AE65AndOver deriving (Enum, Bounded, Eq, Ord, Show)
 
-graKeyText :: GenderT -> RaceT -> AgeT -> CF.ResultKey
-graKeyText g r a = T.pack (show g) <> T.pack (show r) <> ageKey a
+ageRKey :: AgeRT -> CF.ResultKey
+ageRKey A18To24    = "18To24"
+ageRKey A25To44    = "25To44"
+ageRKey A45To64    = "45To64"
+ageRKey A65To74    = "65To74"
+ageRKey A75AndOver = "75AndOver"
 
-gaKeyText :: GenderT -> AgeT -> CF.ResultKey
-gaKeyText g a = T.pack (show g) <> ageKey a
+ageEKey :: AgeET -> CF.ResultKey
+ageEKey AE18To24    = "18To24"
+ageEKey AE25To44    = "25To44"
+ageEKey AE45To64    = "45To64"
+ageEKey AE65AndOver    = "65AndOver"
+
+graKeyText :: GenderT -> RaceT -> AgeRT -> CF.ResultKey
+graKeyText g r a = T.pack (show g) <> T.pack (show r) <> ageRKey a
+
+gaKeyText :: GenderT -> AgeRT -> CF.ResultKey
+gaKeyText g a = T.pack (show g) <> ageRKey a
+
+gaeKeyText :: GenderT -> AgeET -> EducationT -> CF.ResultKey
+gaeKeyText g a e = T.pack (show g) <> ageEKey a <> T.pack (show e)  
 
 raceCode :: RaceT -> Text
 raceCode Black            = "B"
@@ -169,9 +179,9 @@ zeroPaddedText numChars n =
   in  T.pack $ replicate m '0' ++ s
 
 -- NB: These are each one request but lets keep the signatures similar 
-gaeRequests :: GenderT -> AgeT -> EducationT -> CF.ResultKey -> [CF.Request]
+gaeRequests :: GenderT -> AgeET -> EducationT -> CF.ResultKey -> [CF.Request]
 gaeRequests g a e key =
-  let code_number = case (g, a, e) of
+  let code_numbers = case (g, a, e) of
         (Male, AE18To24, LessThan9th) -> [4]
         (Male, AE18To24, LessThan12th) -> [5]
         (Male, AE18To24, HighSchool) -> [6]
@@ -185,7 +195,7 @@ gaeRequests g a e key =
         (Male, AE25To44, SomeCollege) -> [15,23]
         (Male, AE25To44, Associates) -> [16,24]
         (Male, AE25To44, Bachelors) -> [17,25]
-        (Male, AE35To44, AdvancedDegree) -> [18,26]
+        (Male, AE25To44, AdvancedDegree) -> [18,26]
         (Male, AE45To64, LessThan9th) -> [28]
         (Male, AE45To64, LessThan12th) -> [29]
         (Male, AE45To64, HighSchool) -> [30]
@@ -193,9 +203,48 @@ gaeRequests g a e key =
         (Male, AE45To64, Associates) -> [32]
         (Male, AE45To64, Bachelors) -> [33]
         (Male, AE45To64, AdvancedDegree) -> [34]
-        
+        (Male, AE65AndOver, LessThan9th) -> [36]
+        (Male, AE65AndOver, LessThan12th) -> [37]
+        (Male, AE65AndOver, HighSchool) -> [38]
+        (Male, AE65AndOver, SomeCollege) -> [39]
+        (Male, AE65AndOver, Associates) -> [40]
+        (Male, AE65AndOver, Bachelors) -> [41]
+        (Male, AE65AndOver, AdvancedDegree) -> [42]
+        (Female, AE18To24, LessThan9th) -> [45]
+        (Female, AE18To24, LessThan12th) -> [46]
+        (Female, AE18To24, HighSchool) -> [47]
+        (Female, AE18To24, SomeCollege) -> [48]
+        (Female, AE18To24, Associates) -> [49]
+        (Female, AE18To24, Bachelors) -> [50]
+        (Female, AE18To24, AdvancedDegree) -> [51]
+        (Female, AE25To44, LessThan9th) -> [53,61]
+        (Female, AE25To44, LessThan12th) -> [54,62]
+        (Female, AE25To44, HighSchool) -> [55,63]
+        (Female, AE25To44, SomeCollege) -> [56,64]
+        (Female, AE25To44, Associates) -> [57,65]
+        (Female, AE25To44, Bachelors) -> [58,66]
+        (Female, AE25To44, AdvancedDegree) -> [59,67]
+        (Female, AE45To64, LessThan9th) -> [69]
+        (Female, AE45To64, LessThan12th) -> [70]
+        (Female, AE45To64, HighSchool) -> [71]
+        (Female, AE45To64, SomeCollege) -> [72]
+        (Female, AE45To64, Associates) -> [73]
+        (Female, AE45To64, Bachelors) -> [74]
+        (Female, AE45To64, AdvancedDegree) -> [75]
+        (Female, AE65AndOver, LessThan9th) -> [77]
+        (Female, AE65AndOver, LessThan12th) -> [78]
+        (Female, AE65AndOver, HighSchool) -> [79]
+        (Female, AE65AndOver, SomeCollege) -> [80]
+        (Female, AE65AndOver, Associates) -> [81]
+        (Female, AE65AndOver, Bachelors) -> [82]
+        (Female, AE65AndOver, AdvancedDegree) -> [83]
+      queryCodes = fmap (\cn -> "B15001_" <> cn <> "E")
+                        (fmap (zeroPaddedText 3) code_numbers)
+      queryRequests   = concat $ fmap (\x -> CF.query x x) queryCodes
+      computedRequest = CF.addAll key (S.fromList queryCodes)
+  in  computedRequest : queryRequests
           
-gaRequests :: GenderT -> AgeT -> CF.ResultKey -> [CF.Request]
+gaRequests :: GenderT -> AgeRT -> CF.ResultKey -> [CF.Request]
 gaRequests g a key =
   let code_numbers = case (g, a) of
         (Female, A18To24   ) -> [31 .. 34]
@@ -214,7 +263,7 @@ gaRequests g a key =
       computedRequest = CF.addAll key (S.fromList queryCodes)
   in  computedRequest : queryRequests
 
-graRequests :: GenderT -> RaceT -> AgeT -> CF.ResultKey -> [CF.Request]
+graRequests :: GenderT -> RaceT -> AgeRT -> CF.ResultKey -> [CF.Request]
 graRequests g r a key =
   let rc           = raceCode r
       code_numbers = case (g, a) of
@@ -238,39 +287,52 @@ allGRARequests :: [CF.Request]
 allGRARequests = concat $ do
   g :: GenderT <- [minBound ..]
   r :: RaceT   <- [minBound ..]
-  a :: AgeT    <- [minBound ..]
+  a :: AgeRT    <- [minBound ..]
   return $ graRequests g r a (graKeyText g r a)
 
 allGRAKeys :: [CF.ResultKey]
 allGRAKeys = do
   g :: GenderT <- [minBound ..]
   r :: RaceT   <- [minBound ..]
-  a :: AgeT    <- [minBound ..]
+  a :: AgeRT    <- [minBound ..]
   return $ graKeyText g r a
 
 allWNHRequests :: [CF.Request]
 allWNHRequests = concat $ do
   let r = WhiteNonHispanic
   g :: GenderT <- [minBound ..]
-  a :: AgeT    <- [minBound ..]
+  a :: AgeRT    <- [minBound ..]
   return $ graRequests g r a (graKeyText g r a)
 
 allWNHKeys :: [CF.ResultKey]
 allWNHKeys = do
   let r = WhiteNonHispanic
   g :: GenderT <- [minBound ..]
-  a :: AgeT    <- [minBound ..]
+  a :: AgeRT    <- [minBound ..]
   return $ graKeyText g r a
-
 
 allGARequests :: [CF.Request]
 allGARequests = concat $ do
   g :: GenderT <- [minBound ..]
-  a :: AgeT    <- [minBound ..]
+  a :: AgeRT    <- [minBound ..]
   return $ gaRequests g a (gaKeyText g a)
 
 allGAKeys :: [CF.ResultKey]
 allGAKeys = do
   g :: GenderT <- [minBound ..]
-  a :: AgeT    <- [minBound ..]
+  a :: AgeRT    <- [minBound ..]
   return $ gaKeyText g a
+
+allGAERequests :: [CF.Request]
+allGAERequests = concat $ do
+  g :: GenderT <- [minBound..]
+  a :: AgeET <- [minBound..]
+  e :: EducationT <- [minBound..]
+  return $ gaeRequests g a e (gaeKeyText g a e)
+
+allGAEKeys :: [CF.ResultKey]
+allGAEKeys = do
+  g :: GenderT <- [minBound..]
+  a :: AgeET <- [minBound..]
+  e :: EducationT <- [minBound..]
+  return $ gaeKeyText g a e
